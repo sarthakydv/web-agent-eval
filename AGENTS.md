@@ -23,6 +23,16 @@ the score is comparable to a published baseline.
   Stop and report; do not work around it.
 - **Evidence is output, not assertion.** Paste real command output into the
   `evidence` field. "Tests pass" is not evidence; the test output is.
+- **A check that asserts "clean" ships with a control that must fail.** Before
+  trusting a passing gate, break it on purpose and confirm it exits non-zero
+  naming the problem. Before trusting an empty search, search for something you
+  know is present and confirm the pipeline finds it. Three checks passed
+  vacuously in a single session: `grep` here is **ugrep** and honours
+  `.gitignore` (so a secret scan skipped `.env` itself), `git grep -E` has no
+  `\b` word boundary (so a content scan matched nothing regardless of content),
+  and **zsh does not word-split an unquoted `$var`** (so a loop handed `git` one
+  malformed argument and read its empty stdout as "no difference"). Each looked
+  like a pass. See `docs/DECISIONS.md` entry 8.
 - **No `Co-Authored-By` trailer**, ever.
 - Stay in scope. Do not touch files unrelated to your feature.
 
