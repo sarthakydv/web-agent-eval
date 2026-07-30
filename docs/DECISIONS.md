@@ -15,6 +15,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **6** (2026-07-31) — `feat-002`: the observation serializer, and how tokens are counted
 - **7** (2026-07-31) — The run loop: what it may retry, and what it may not call a failure
 - **8** (2026-07-31) — The tracker enforces its own rules, and each rule was tested by breaking it
+- **9** (2026-07-31) — What this key actually serves: `glm-5.1` is not one of the things
 
 <!-- INDEX:END -->
 
@@ -579,6 +580,59 @@ It is idempotent: run it again after a completed run and it prints the summary
 and changes nothing. Each round appends a line with what it attempted, what
 became terminal, and any backoff it applied.
 
+### Concurrency is capped by the provider at 3, not by this machine
+
+**Added 2026-07-31, still before `feat-004` exists.**
+
+The obvious speedup for a 102-task run is to run episodes in parallel, and this
+machine invites it: M1 Max, 10 cores, 64 GB. That is not the constraint. z.ai
+publishes a **per-model concurrency limit, and for `glm-4.6` it is 3.**
+
+```
+GLM-4.6      3        GLM-4.5      10       GLM-4-Plus   20
+GLM-5        2        GLM-5.1      10       GLM-4.5-Air   5
+```
+
+An episode is model-bound, not CPU-bound: the gate's single task spent 35.4 s
+wall-clock on 9 model calls (entry 4). The cores would idle. Three concurrent
+episodes is therefore roughly a 3× wall-clock improvement and the ceiling; more
+workers only queue at the provider or trip the limit, and a
+concurrency-limit rejection is a `provider_error` under the rule above — never a
+task failure. Building for 8 workers would manufacture exactly the failure mode
+this entry exists to prevent.
+
+**The limit is published for the pay-as-you-go API; this key is a Coding Plan
+key** (entry 4), and the two are demonstrably not the same product. So the
+published 3 is the *starting* assumption, not a measurement. Before the full run,
+probe it: fire 2, 3, 4 and 5 concurrent trivial completions on this key, record
+which are rejected and with what code, and put the number in a DECISIONS entry.
+Assuming a limit is how the run ends up with a wall of provider errors it then
+has to explain.
+
+**Model choice is not a throughput knob.** `glm-4.5` and `glm-5.1` allow 10, and
+switching to one of them to go faster would change the subject of the
+measurement. This project measures GLM-4.6. Changing that is a human scoping
+decision, recorded here first, exactly like the refusal in entry 3 to switch to a
+paid OpenAI model when the gate looked blocked.
+
+**Workers are processes, not threads.** agisdk drives Playwright's sync API,
+which has thread affinity; and a process boundary contains a browser crash or
+leak to one episode, which matters across a multi-hour batch.
+
+**No two concurrent episodes on the same site.** REAL scores by diffing
+environment state — the gate's own result was
+`differences: {emails: {updated: [{id: "53", isRead: true}]}}`. If the replica
+holds that state server-side and shared, two concurrent episodes on the same host
+contaminate each other's diff and the score is silently wrong. Whether REAL
+isolates state per episode is not established anywhere in this record. With 10
+usable sites (entry 5) and a ceiling of 3 workers, partitioning by site costs
+nothing and removes the question. If isolation is later measured and holds, this
+constraint can be lifted — with the measurement recorded.
+
+**Any timing number carries its concurrency.** Per-task wall-clock at N=3 is not
+comparable to sequential, and quoting one as the other would be the same category
+of error as quoting a replica score as a live-web score.
+
 ### What is deliberately *not* looped
 
 **No autonomous coding loop in this repo.** The remaining features are
@@ -661,3 +715,79 @@ the reflog expired and `git gc --prune=now` run, after confirming that each old
 commit was content-identical to its rewritten counterpart except the root's single
 deleted line, that nothing was unpushed, and that no stash existed. `main` is now
 the only local branch, so no `git push --all` can publish an unintended ref.
+
+---
+
+## 9 — What this key actually serves: `glm-5.1` is not one of the things
+
+**Date:** 2026-07-31
+**Status:** measurement, and the decision it informs — see the end of this entry
+**Reproduce:** one trivial completion per model against
+`https://api.z.ai/api/coding/paas/v4/chat/completions`, reading back the `model`
+field the server reports rather than the one requested.
+
+z.ai publishes a per-model concurrency limit — `glm-4.6` is **3**, while
+`glm-5.1`, `glm-5.2` and `glm-4.5` are **10** — which makes a faster model look
+like a free 3× on `feat-006`'s run time. It is not free, and one of the options
+does not exist.
+
+### Requested model vs served model
+
+```
+requested   served      finish   total_tokens (trivial prompt)
+glm-4.6  -> glm-4.6     stop     16
+glm-4.5  -> glm-4.5     stop     162
+glm-5.1  -> glm-5.2     stop     23     <- alias
+glm-5    -> glm-5.2     stop     23     <- alias
+glm-5.2  -> glm-5.2     stop     23
+```
+
+**`glm-5.1` cannot be pinned on this endpoint.** Ask for it and `glm-5.2`
+answers. `glm-4.6` and `glm-4.5` echo back exactly what was requested.
+
+That matters more here than the speed does. This project's claim is a
+*reproducible* score on deterministic replicas; a model string the server is free
+to re-point is the one part of the setup that would not be reproducible, and a
+rerun in three months could silently measure a different model while the README
+still said `glm-5.1`. If a 5.x model is ever chosen, the record must name what
+was **served** on the day, not what was asked for.
+
+### Both are reasoning models, and reasoning scales with the token cap
+
+```
+glm-4.6  max_tokens=64   completion=56   of which reasoning=50
+glm-5.2  max_tokens=64   completion=16   of which reasoning=10
+glm-5.2  max_tokens=512  completion=132  of which reasoning=126
+```
+
+Raising the cap raised `glm-5.2`'s reasoning spend eightfold for an identical
+one-line prompt. So `feat-003`'s token cap is not only a safety bound — it is an
+input to claim 2, tokens per task. Whatever it is set to must be held constant
+across every arm and stated with the number.
+
+### What switching would cost, if it is ever chosen
+
+Entry 4's gate result and entry 6's token calibration (cl100k understating z.ai's
+`prompt_tokens` by 1.5% aggregate, 2.2% worst case) were both measured on
+`glm-4.6`, and neither transfers. Both would have to be re-run and recorded as
+superseding, and every arm of `feat-006` and `feat-007` would have to be on one
+model. Cheap today — two features are done — and expensive after the full run.
+
+The throughput argument on its own is worth roughly an hour of wall-clock, once.
+That is not a reason to change what the project measures. A belief that 5.2 is
+the more interesting subject would be a reason; it is a human decision either
+way, and it is recorded here before any code depends on it.
+
+### Decision: the project stays on `glm-4.6`
+
+**Decided 2026-07-31.** The three-fold concurrency of a 5.x model is worth about
+an hour of wall-clock, once, on a run that `feat-004` makes restartable anyway.
+Against that: `glm-5.1` cannot be pinned, `glm-5.2` is what actually answers, and
+a score whose model string the provider can re-point is not the reproducible
+number this project exists to produce. `glm-4.6` echoes back exactly what was
+requested, and entries 4 and 6 already stand on it.
+
+This is a decision about what is measured, not about how fast it runs, and it was
+taken by a human with the alternatives written down first. Revisiting it later is
+allowed; doing so silently is not, and after `feat-006` has run it would mean
+re-running everything.
