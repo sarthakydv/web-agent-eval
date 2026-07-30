@@ -22,6 +22,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The project is not installed into the venv (no build-system table), so tests
+# reach the package through the source tree.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
