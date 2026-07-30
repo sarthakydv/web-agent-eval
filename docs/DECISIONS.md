@@ -16,6 +16,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **7** (2026-07-31) — The run loop: what it may retry, and what it may not call a failure
 - **8** (2026-07-31) — The tracker enforces its own rules, and each rule was tested by breaking it
 - **9** (2026-07-31) — What this key actually serves: `glm-5.1` is not one of the things
+- **10** (2026-07-31) — The agent is GLM; the scorer is REAL's own judge
 
 <!-- INDEX:END -->
 
@@ -791,3 +792,52 @@ This is a decision about what is measured, not about how fast it runs, and it wa
 taken by a human with the alternatives written down first. Revisiting it later is
 allowed; doing so silently is not, and after `feat-006` has run it would mean
 re-running everything.
+
+---
+
+## 10 — The agent is GLM; the scorer is REAL's own judge
+
+**Date:** 2026-07-31
+**Status:** decided before `feat-005`, which is the first feature that depends on it
+
+`agisdk` grades `llm_boolean` evals with an LLM judge: `client = OpenAI()`
+constructed with no arguments (`browsergym/webclones/utils.py:15`), and the judge
+model defaults to `gpt-4.1` (`browsergym/webclones/evaluate.py:13`). Entry 5
+counted the consequence: **60 of the 112 v1 tasks have at least one such eval**,
+which is why only 47 are both reachable and scorable on the z.ai key alone.
+
+### Why n=47 was rejected
+
+The cheap path is to score only the `jmespath` tasks and report n=47. It is
+cheap and it is wrong, because that subset is **not a random sample**.
+`jmespath` evals check state mutations — did the email get marked read, did the
+booking appear. `llm_boolean` evals check answer text. Those are different task
+shapes and plausibly different difficulty classes, so a score over the 47 is not
+an estimate of the score over the 112, and comparing it to REAL's published
+**≤41%** would be comparing two different task sets. Comparability against a
+published baseline is the entire reason this project left the live web (entry 1);
+spending it to save a few dollars of judging would be a poor trade.
+
+### The decision
+
+An OpenAI key is used **for scoring only**, with REAL's own default judge, so the
+number is produced the way the baseline's was.
+
+This does not contradict entry 3's refusal to switch the agent to a paid OpenAI
+model. That refusal protected the *subject* of the measurement; this is the
+*instrument*, and using the benchmark's own scorer is the conservative choice
+rather than a substitution. Stated plainly wherever the number appears: **the
+agent is `glm-4.6`, the scorer is `gpt-4.1` as shipped by agisdk.**
+
+### An optional finding, if it is free
+
+`OpenAI()` with no arguments reads `OPENAI_BASE_URL`, so the judge can be pointed
+at z.ai and run on GLM instead — the judge model string would also need
+overriding, which likely means constructing the evaluator directly rather than
+going through `harness()`. Running both judges over the same episodes and
+reporting their **agreement rate** costs no extra agent runs and would be a real
+finding. It is optional, and it is not the headline: the headline is scored by
+REAL's judge.
+
+The key is a placeholder in `.env` until it is filled. Empty means unset, and
+the SDK raises a clear error rather than failing quietly.
