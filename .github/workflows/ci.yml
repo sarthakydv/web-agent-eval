@@ -63,5 +63,8 @@ jobs:
           sys.exit(1 if problems else 0)
           PY
 
+      - name: Decisions index is current
+        run: python3 scripts/decisions_index.py --check
+
       - name: Tests, with no key in the environment
         run: env -u ZAI_API_KEY uv run pytest -q -k "not api_key"

@@ -7,9 +7,20 @@ the score is comparable to a published baseline.
 ## Startup Workflow
 
 1. `pwd` — confirm you are in `web-agent-eval`.
-2. Read this file, then `feature_list.json`, then `docs/DECISIONS.md`.
-3. Run `./init.sh`. If it fails, fix that before adding scope.
-4. `git log --oneline -5`.
+2. Run `./init.sh`. If it fails, fix that before adding scope. It prints the
+   tracker's state: counts, anything in flight, and the next available feature.
+3. Read this file, then **only your feature's entry** in `feature_list.json`.
+4. Read the **entry index** at the top of `docs/DECISIONS.md`, then open only the
+   entries your feature depends on.
+5. `git log --oneline -5`.
+
+**Do not read `feature_list.json` or `docs/DECISIONS.md` end to end.** Both grow
+with the project — the tracker carries pasted output, the log carries every
+measurement — and both are references, not briefings. `init.sh` summarises the
+tracker; `scripts/decisions_index.py` keeps the log's index current and
+`init.sh` fails if it is stale. The sibling P1 repo reached 237 KB of startup
+reading before this rule existed, about 59k tokens spent before a line of code
+was read.
 
 ## Working Rules
 

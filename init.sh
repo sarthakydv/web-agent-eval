@@ -89,6 +89,11 @@ print('  agisdk: import ok, REAL.harness callable')
 uv run ruff check . || fail "ruff"
 uv run pytest -q || fail "pytest"
 
+# The decisions log is append-only and grows with the project. Nothing may read
+# it end to end, so the index at its top is how a session finds an entry — and a
+# stale index is worse than none, because it is trusted.
+python3 scripts/decisions_index.py --check || fail "docs/DECISIONS.md index is stale"
+
 echo ""
 if [ "$FAILURES" -gt 0 ]; then
   echo "=== $FAILURES CHECK(S) FAILED — fix before claiming any feature done ==="
@@ -97,7 +102,9 @@ fi
 
 echo "=== All checks passed ==="
 echo ""
-echo "1. Read AGENTS.md, then feature_list.json, then docs/DECISIONS.md"
-echo "2. Take ONE feature id and nothing else"
-echo "3. Paste real command output into its evidence field — not 'tests pass'"
-echo "4. Stop and report on a [GATE]; never work around it"
+echo "1. Read AGENTS.md, then ONLY your feature's entry in feature_list.json"
+echo "2. Read the entry index at the top of docs/DECISIONS.md; open only the"
+echo "   entries your feature depends on. Neither file is read end to end."
+echo "3. Take ONE feature id and nothing else"
+echo "4. Paste real command output into its evidence field — not 'tests pass'"
+echo "5. Stop and report on a [GATE]; never work around it"
