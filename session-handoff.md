@@ -4,82 +4,114 @@
 
 - **Goal:** Measure a web agent on REAL (112 tasks, 11 deterministic replica
   sites) with every number traceable to something that actually ran.
-- **Current status:** `feat-001` `[GATE]` **passed**. One REAL task ran end to
-  end on GLM and scored **1.0**. Nothing else is built. Next is `feat-002`.
+- **Current status:** `feat-001` `[GATE]` **passed** and `feat-002` **done**. One
+  REAL task ran end to end on GLM and scored **1.0**; the observation serializer
+  now renders that kind of observation at a parameterised richness level under a
+  measured token budget. The agent loop is not built. Next is `feat-003`.
 - **Branch / commit:** `main`. No remote yet.
 
-## Completed This Session
+## Completed This Session (`feat-002`)
 
-- [x] **`feat-001` [GATE].** `v1.gomail-2` on `glm-4.6` via z.ai:
-      `cum_reward = 1.0`, 9 steps, 35.4 s wall clock, 20 931 GLM tokens.
-      Reproduce with `uv run python scripts/run_gate.py`.
-- [x] All three of the gate's questions answered with recorded command output —
-      `docs/DECISIONS.md` entry 4.
-- [x] Found and recorded two things the plan did not know: the z.ai key is a
-      **Coding Plan** key on a different base URL, and one of the 11 sites has
-      been **DMCA-taken-down** — entries 4 and 5.
-- [x] `src/web_agent_eval/` created: `glm.py` (client) and `gate_agent.py`
-      (minimal agent, gate scaffolding only). 5 new regression tests.
+- [x] **`src/web_agent_eval/observation.py`** — one direction, observation to
+      text. `Richness` is a frozen dataclass and `serialize(obs, level)` takes
+      one, so `feat-007` varies a data object rather than a branch. A
+      caller-defined level needs no change to `serialize()`, and a test asserts
+      that.
+- [x] **Two levels ship.** `lean` = visible nodes carrying a bid, no
+      annotations, no HTML. `rich` = every visible node with visibility,
+      clickability and centre coordinates, plus pruned HTML, open tabs, focused
+      element and a screenshot note. On a loaded page `rich` costs 4x-6x `lean`.
+- [x] **Fixtures are real captures, and the gate had left none.** Its four run
+      directories hold `summary_info.json`, `experiment.log`, `exp_args.pkl`,
+      `goal_object.pkl.gz` and `finish_state.json` — no DOM, no accessibility
+      tree, no screenshot. Five observations were captured fresh from live runs
+      on two sites (`scripts/capture_observations.py`) and committed under
+      `fixtures/observations/`.
+- [x] **Token budget stated and measured**, in both units — see the table below.
+- [x] **38 new tests**, none of which start a browser or need an API key.
 
-## The three answers, short form
+## The budget, in the two units it exists in
 
-| Question | Answer |
+| | |
 |---|---|
-| 1. Custom OpenAI-compatible `base_url`? | **Yes — via `harness(agentargs=...)`.** NOT via `harness(model=...)`: the built-in agent routes on model-name prefix (`gpt-`/`claude-`/`openrouter/`/`local/`) and exposes no `base_url` at all. |
-| 2. Sites local or hosted? | **Hosted, on Vercel** — `https://evals-<site>.vercel.app`, not `realevals.xyz` (that is the leaderboard). Nothing ships to serve them locally. Network latency stays; the migration bought determinism, not speed. |
-| 3. Leaderboard key for local scoring? | **No.** `run_id` defaults to `'0'` and submission only fires when it is not `'0'`. **But** 60 of 112 tasks have an `llm_boolean` eval graded by an OpenAI `gpt-4.1` judge that agisdk hardcodes — a different key, and a `feat-005` problem. |
+| Claim | **no rendered observation exceeds 12 000 tokens as z.ai counts them** |
+| Enforced locally at | **11 741** `cl100k_base` tokens (12 000 / 1.022) |
+| Why the margin | `cl100k_base` understates z.ai's `prompt_tokens` by up to **2.2%**, measured on 10 real calls |
+| Largest provider count observed | **11 979** ≤ 12 000 |
+| Rejected alternative | `o200k_base` — overstates by 2.2% aggregate and swings 0.943–1.025 per case |
+
+**Method:** two real chat completions per fixture/level, byte-identical apart
+from the observation text, differenced on `prompt_tokens`. Identical framing on
+both sides, so the difference is z.ai's count of exactly what the serializer
+produced. `uv run python scripts/token_check.py` reproduces it.
+
+**This is not entry 4's 20 931.** That was `usage` summed over a whole 9-step
+episode — prompts and completions — not a local count of one observation. Budget
+accounting (local, offline, testable) and cost accounting (`feat-005`, provider
+`usage` only) stay separate from here on.
 
 ## Verification Evidence
 
 | Check | Command | Result |
 |---|---|---|
-| Gate | `uv run python scripts/run_gate.py` | `cum_reward: 1.0`, `terminated: True`, `err_msg: None` |
-| z.ai endpoint | direct HTTP probe | `paas/v4` → 429, `coding/paas/v4` → 200, bogus key → 401 |
-| Sites | `curl` over all 11 hosts | 10 × 200, omnizon × 451 `DMCA_TAKEDOWN` |
+| Two levels, one budget | `uv run python scripts/render_observation.py` | 10 rows, all `ok=True`; `lean` 88–2 309, `rich` 550–11 738 tokens |
+| Local vs provider count | `uv run python scripts/token_check.py` | `glm/cl100k` = 1.015 aggregate, 1.022 worst case |
+| No browser, no key | `env -u ZAI_API_KEY uv run pytest tests/test_observation.py tests/test_tokens.py -q` | `38 passed in 2.26s` |
 | Lint | `uv run ruff check .` | `All checks passed!` |
-| Tests | `uv run pytest -q` | `8 passed in 0.82s` |
-| Full path | `./init.sh` | `=== All checks passed ===` |
+| Full path | `./init.sh` | `46 passed`, `=== All checks passed ===` |
 
 ## Decisions Made
 
-Entries 4 and 5 appended to `docs/DECISIONS.md` this session; 1–3 predate it.
+Entry 6 appended to `docs/DECISIONS.md` this session; 1–5 predate it.
 
-4. **The gate passed, and how.** The `agentargs` seam; the Coding Plan base URL
-   (`https://api.z.ai/api/coding/paas/v4/`); `glm-4.6` reasons by default and
-   needs `thinking: disabled`; local scoring needs no leaderboard key but
-   `llm_boolean` tasks need an OpenAI one. Also records that the gate **failed
-   twice before it passed**, and why.
-5. **`evals-omnizon.vercel.app` is DMCA-taken-down.** 10 of 112 tasks are
-   unrunnable. `feat-006`'s denominator is **n = 102** unless it returns.
+6. **The serializer, its richness seam and the token accounting.** Why the
+   fixtures had to be captured rather than reused; what the two levels differ in
+   and what they deliberately do not (goal, URL and last-action error render at
+   every level, because dropping them changes the task rather than the richness);
+   the screenshot contributes its dimensions and nothing else, because `glm-4.6`
+   via z.ai is text-only; and the measured disagreement between the local
+   tokenizer and the provider's own count.
 
 ## Blockers / Risks
 
-- **`feat-006`'s denominator is 102, not 112**, and the exclusion count and
-  reason must be published beside the rate.
+- **`feat-006`'s denominator is 102, not 112.** `evals-omnizon.vercel.app` is
+  DMCA-taken-down (451). The count and reason must be published beside any rate.
+  Nothing in `feat-002` works around it — entry 5, and it is a human decision.
 - **`feat-005` has an unanswered cost question**: 60 of 112 tasks are graded by
-  OpenAI `gpt-4.1`, not by z.ai. That is a second provider, a second key and a
-  second cost line in a project whose subject is GLM. 47 tasks are both
-  reachable and scorable with z.ai alone.
+  an OpenAI `gpt-4.1` judge, not by z.ai. 47 tasks are both reachable and
+  scorable with z.ai alone.
+- **`rich` truncates on large pages.** On both staynb fixtures the budget binds
+  and lines are dropped (reported per section, never silently). That is a real
+  property of the arm `feat-007` will compare, not a bug to hide.
 - **Replica sites are easier than live ones.** A score here is not comparable to
   a live-web score.
 
 ## Next Session Startup
 
 1. Read `AGENTS.md`, then `feature_list.json`, then `docs/DECISIONS.md`.
-2. Run `./init.sh` — expect all checks passed.
+2. Run `./init.sh` — expect `46 passed` and all checks passed.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
-4. Take `feat-002` and nothing else.
+4. Take `feat-003` and nothing else.
 
 ## Recommended Next Step
 
-`feat-002`, the observation serializer. Two hard-won constraints carry into it,
-both in DECISIONS entry 4: **the action must be extracted from the reply, never
-passed through** (browsergym's parser turns prose into function calls), and
-**`glm-4.6` needs `thinking: disabled`** or it spends the whole token budget on
-reasoning it never returns.
+`feat-003`, the agent loop with caps. Four things carry into it:
 
-`src/web_agent_eval/gate_agent.py` is scaffolding, not the project's agent — its
-12 000-char axtree truncation is an arbitrary number and `feat-002` owes it
-nothing.
+- **Only a wall-clock race bounds an action.** Per-operation timeouts do not —
+  the predecessor sat on one site for nine minutes with every sub-timeout at
+  45 s or less.
+- **Extract the action; never hand browsergym the raw reply** — its parser turns
+  English prose into function calls. `extract_action` and its regression tests
+  already exist and stay on the action side.
+- **`glm-4.6` needs `extra_body={"thinking": {"type": "disabled"}}`** or it
+  spends the whole `max_tokens` budget on reasoning it never returns.
+- **Call `serialize(obs, level)` and do not run agisdk's
+  `default_obs_preprocessor`** — it deletes `axtree_object` and `dom_object`.
+  The serializer falls back to a pre-flattened tree and labels it in the text,
+  but a fallback is not the richness level the ablation asked for.
+
+`src/web_agent_eval/gate_agent.py` is still gate scaffolding. Its 12 000-*char*
+axtree truncation was an arbitrary number; the measured budget that replaces it
+lives in `observation.py`.

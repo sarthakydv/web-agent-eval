@@ -12,4 +12,9 @@ __pycache__/
 # matter get written into docs/DECISIONS.md, not left here.
 runs/
 
+# tiktoken's BPE file, fetched once on first use. Regenerable, ~1.7 MB, and not
+# something to vendor. `fixtures/` is the opposite case and IS tracked: those
+# captures are evidence and cannot be regenerated identically.
+.cache/
+
 .DS_Store

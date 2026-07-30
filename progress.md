@@ -3,9 +3,10 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001` is done, next is `feat-002`
-**Status:** the `[GATE]` is through. GLM drives agisdk and one REAL task scored
-**1.0**. Nothing else has been built.
+**Active Feature:** none — `feat-001` and `feat-002` are done, next is `feat-003`
+**Status:** the `[GATE]` is through (one REAL task scored **1.0**) and the
+observation serializer exists, with richness as a parameter and a measured token
+budget. The agent loop and its caps are not built.
 
 ## Status
 
@@ -22,15 +23,31 @@
       `cum_reward = 1.0`, 9 steps, 35.4 s, 20 931 tokens. All three questions
       answered with recorded output — `docs/DECISIONS.md` entry 4.
 - [x] 8 tests passing (3 environment, 5 action extraction).
+- [x] **`feat-002` done.** `src/web_agent_eval/observation.py` renders an agisdk
+      observation as text at a parameterised richness level. Two levels ship
+      (`lean`, `rich`); a caller-defined level needs no change to `serialize()`,
+      which is what `feat-007` requires. `docs/DECISIONS.md` entry 6.
+- [x] **Fixtures are real captures.** The gate persisted no observation — its
+      run directories hold summaries and logs only — so five were captured
+      fresh from live runs on two sites and committed under
+      `fixtures/observations/` (DOM snapshot, accessibility tree, element
+      properties, 1280x720 PNG).
+- [x] **Token budget: 12 000 provider tokens, enforced locally at 11 741.**
+      Counted with `tiktoken`/`cl100k_base` and checked against z.ai's own
+      `prompt_tokens` on 10 real calls: local understates by 1.5% aggregate,
+      2.2% worst case. Largest provider-side rendering measured: 11 979.
+- [x] 46 tests passing; the 38 serializer/token tests run with no browser and
+      no API key.
 
 ### What's In Progress
 
-- Nothing. Stopped at the gate as instructed. `feat-002` is not started.
+- Nothing. Stopped after `feat-002` as instructed. `feat-003` is not started.
 
 ### What's Next
 
-1. `feat-002` — observation serializer, with richness as a parameter.
-2. Two things `feat-002`/`feat-003` inherit from the gate and must not
+1. `feat-003` — the agent loop with caps on steps, tokens and wall-clock. Only a
+   wall-clock race bounds an action; per-operation timeouts do not.
+2. Two things `feat-003` inherits from the gate and must not
    rediscover — both are in DECISIONS entry 4:
    - **Extract the action; never hand browsergym the raw reply.** Its parser
      scans the whole string and pyparsing skips whitespace, so prose like
@@ -67,18 +84,34 @@
   working endpoint is `api.z.ai/api/coding/paas/v4/`. A bogus key returns 401,
   which is how we know it authenticates — entry 4.
 - **Local scoring needs no leaderboard key** — entry 4, Q3.
+- **Richness is a data object, not a branch.** `serialize(obs, level)` takes a
+  `Richness`; `feat-007` varies that object and nothing else — entry 6.
+- **Goal, URL and last-action error render at every richness level.** Dropping
+  them would change the task rather than the richness — entry 6.
+- **Tokens: local `cl100k_base` for budgets, provider `usage` for cost.** The
+  local count was measured against z.ai's own and understates it by up to 2.2%;
+  the budget absorbs that rather than ignoring it — entry 6.
 
 ## Files Modified This Session
 
-`src/web_agent_eval/{__init__,glm,gate_agent}.py`, `scripts/run_gate.py`,
-`tests/test_gate_agent.py`, `pyproject.toml`, `feature_list.json`,
+`src/web_agent_eval/{observation,tokens,fixtures}.py`,
+`scripts/{capture_observations,render_observation,token_check}.py`,
+`tests/{test_observation,test_tokens}.py`, `fixtures/observations/` (5 captures
+plus screenshots), `pyproject.toml`, `.gitignore`, `feature_list.json`,
 `docs/DECISIONS.md`, `progress.md`, `session-handoff.md`.
+
+Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
+`scripts/run_gate.py`, `tests/test_gate_agent.py`.
 
 ## Evidence of Completion
 
 - [x] Gate run: `cum_reward: 1.0`, `terminated: True`, `err_msg: None` on
       `v1.gomail-2`; full transcript in `feature_list.json`'s evidence field.
-- [x] Tests pass: `uv run pytest -q` → `8 passed in 0.82s`
+- [x] Serializer: `uv run python scripts/render_observation.py` → both levels of
+      all five fixtures under budget; `rich` is 4x-6x `lean` on a loaded page.
+- [x] Token count checked against the provider: `uv run python
+      scripts/token_check.py` → `glm/cl100k` ratio 1.015 aggregate, 1.022 worst.
+- [x] Tests pass: `uv run pytest -q` → `46 passed in 2.15s`
 - [x] Lint clean: `uv run ruff check .` → `All checks passed!`
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
 
@@ -88,7 +121,17 @@ Setup gained one step: **`uv run playwright install chromium`**. `agisdk` pins
 Chromium build 1228 and a mismatched build fails the run with an error that
 looks nothing like a version problem.
 
-`src/web_agent_eval/gate_agent.py` is gate scaffolding, not the project's agent.
-`feat-002` owns the observation serializer and `feat-003` owns the loop and its
-caps; nothing in `GateAgent` is a design decision for either. Its 12 000-char
-axtree truncation in particular is an arbitrary number, not a measured budget.
+`src/web_agent_eval/gate_agent.py` is still gate scaffolding, not the project's
+agent. `feat-003` owns the loop and its caps and owes it nothing — its
+12 000-char axtree truncation in particular was an arbitrary number, and the
+measured budget that replaces it lives in `observation.py`.
+
+`feat-003` should call `serialize(obs, level)` and must **not** run agisdk's
+`default_obs_preprocessor`, which deletes `axtree_object` and `dom_object`. The
+serializer falls back to a pre-flattened tree and says so in the text, but a
+fallback is not the richness level anyone asked for.
+
+Two accounting lines exist now and must never be mixed: **budget accounting** is
+local `tiktoken` over a rendered observation; **cost accounting** (`feat-005`) is
+the provider's `usage` field summed from real responses. Entry 4's 20 931 is the
+second kind.

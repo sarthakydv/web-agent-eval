@@ -314,3 +314,177 @@ anyway: determinism protects against pages *changing*, not against a host
 Combined with entry 4's judge finding: of the 112 v1 tasks, 10 are unreachable,
 60 need an OpenAI judge to be scored, and **47 are both reachable and scorable
 with no API key but z.ai's**.
+
+---
+
+## 6 — `feat-002`: the observation serializer, and how tokens are counted
+
+**Date:** 2026-07-31
+**Reproduce:** `uv run python scripts/render_observation.py` (offline),
+`uv run python scripts/token_check.py` (one real z.ai call per fixture/level).
+
+### The fixtures are real captures, and the gate did not leave any
+
+`feat-002`'s tests run against observations that came off a live agisdk run, not
+against a page anybody wrote by hand. That distinction is the whole value of the
+tests: a serializer checked against a hand-written DOM is a test of the
+hand-written DOM.
+
+The gate's four stored runs under `runs/gate/` do **not** contain an
+observation. They hold `summary_info.json`, `experiment.log`, `exp_args.pkl`,
+`goal_object.pkl.gz` and `finish_state.json`; the agent's own
+`v1.gomail-2.trace.jsonl` records url, reply, action and usage per step. No DOM,
+no accessibility tree, no screenshot. **So observations were captured fresh** —
+`scripts/capture_observations.py`, two tasks, ten steps, of which five are
+committed:
+
+```
+fixtures/observations/v1.gomail-2_step00.json.gz      7,417B   +   14,002B png
+fixtures/observations/v1.gomail-2_step02.json.gz     89,432B   +  635,368B png
+fixtures/observations/v1.gomail-2_step03.json.gz     24,223B   +  346,487B png
+fixtures/observations/v1.staynb-1_step00.json.gz    160,564B   +  599,981B png
+fixtures/observations/v1.staynb-1_step02.json.gz    182,344B   +  285,091B png
+```
+
+Each is the raw observation browsergym handed the agent — the full CDP DOM
+snapshot, the merged accessibility tree, the extracted element properties, the
+goal, the URLs and the 1280x720 screenshot as PNG. Two sites, deliberately, so
+the serializer is not tuned to one page shape:
+
+```
+v1.gomail-2_step00   ax_nodes=  13  dom_strings= 267   page still loading
+v1.gomail-2_step02   ax_nodes=1498  dom_strings=2651   inbox, loaded
+v1.gomail-2_step03   ax_nodes= 237  dom_strings= 837   after click('209')
+v1.staynb-1_step00   ax_nodes=3588  dom_strings=4162   landing page
+v1.staynb-1_step02   ax_nodes=4074  dom_strings=4804   after a date fill
+```
+
+`gomail-2_step00` is kept precisely because it is degenerate: 13 nodes, a page
+that had not finished loading. That is why the gate's first two actions were
+`noop()`, and it is the kind of observation nobody writes by hand.
+
+### The seam: richness is a data object, not a branch
+
+`Richness` is a frozen dataclass; `serialize(obs, level)` takes one. Two levels
+ship, and they differ only in the fields of that object:
+
+```
+lean : axtree(filter_visible_only=True, filter_with_bid_only=True, skip_generic=True)
+rich : axtree(filter_visible_only=True, skip_generic=True, with_center_coords=True,
+              with_clickable=True, with_visible=True) + pruned-html + page-context
+              + screenshot-note
+```
+
+`feat-007` varies this object and nothing else. A caller-defined level works
+without touching `serialize()`, and there is a test that asserts exactly that —
+if a new rung required a code change, the ablation would be comparing a code
+change too.
+
+**What does not vary with richness: the goal, the URL and the last action's
+error.** They are rendered at every level. Removing them would not make an
+observation poorer, it would change the task the agent was given, and it would
+confound the ablation this seam exists for.
+
+### The screenshot contributes its dimensions and nothing else
+
+Stated plainly rather than glossed. `glm-4.6` through z.ai's coding plan is
+text-only, so no pixels are sent. The screenshot is captured and committed
+because it is part of the observation and a vision model would use it, but at
+`rich` it renders as one line — `1280x720 screenshot captured and stored, but
+not sent` — and pretending otherwise would misdescribe what the model saw.
+
+### The budget: 12 000 tokens, and there are two numbers for it
+
+**The claim is provider-side: no rendered observation exceeds 12 000 tokens as
+z.ai counts them.** Enforcement has to be local, because a unit test cannot bill
+an API call, and the local tokenizer is not GLM's. So:
+
+```
+PROVIDER_TOKEN_BUDGET     = 12 000     the claim, in z.ai's units
+MEASURED_LOCAL_UNDERCOUNT = 1.022      worst case measured, see the table below
+TOKEN_BUDGET              = 11 741     what the code enforces, locally
+```
+
+12 000 is itself a measured choice: across the five fixtures the richest
+accessibility tree tops out near 11 000 tokens before any HTML, and the leanest
+sits near 2 000. A budget much below that truncates the rich arm on every page
+and turns `feat-007` into a comparison of two truncations. Enforcement is by
+line-wise truncation with the count of dropped lines reported, never by hope:
+
+```
+fixture                    level   tokens  budget   ok  truncated
+v1.gomail-2_step00         lean        88  11,741 True  -
+v1.gomail-2_step00         rich       550  11,741 True  -
+v1.gomail-2_step02         lean     2,009  11,741 True  -
+v1.gomail-2_step02         rich    11,731  11,741 True  html -508 lines
+v1.gomail-2_step03         lean       873  11,741 True  -
+v1.gomail-2_step03         rich     9,433  11,741 True  -
+v1.staynb-1_step00         lean     1,231  11,741 True  -
+v1.staynb-1_step00         rich    11,734  11,741 True  axtree -147 lines, html -414 lines
+v1.staynb-1_step02         lean     2,309  11,741 True  -
+v1.staynb-1_step02         rich    11,738  11,741 True  axtree -519 lines, html -757 lines
+```
+
+The two arms are 4x–6x apart in tokens on a loaded page, which is the cost side
+of what `feat-007` will trade against success rate.
+
+### How tokens were counted, and where that count is wrong
+
+**Locally: `tiktoken`, encoding `cl100k_base`.** That is not GLM's tokenizer —
+z.ai publishes none for `glm-4.6` — so the local count is an approximation, and
+an unchecked approximation is a guess with a library behind it.
+
+It was checked. `scripts/token_check.py` sends two real chat completions per
+fixture/level that are byte-identical apart from the observation text, and
+differences their `prompt_tokens`: identical framing on both sides, so the
+difference is z.ai's own count of exactly the serializer's output.
+
+```
+model            : glm-4.6 via https://api.z.ai/api/coding/paas/v4/
+framing baseline : prompt_tokens=11 for the fixed system message plus '.'
+
+fixture                    level   cl100k    o200k      glm  glm/cl100k  glm/o200k
+v1.gomail-2_step00         lean        88       88       88       1.000      1.000
+v1.gomail-2_step00         rich       550      552      555       1.009      1.005
+v1.gomail-2_step02         lean     2,009    2,004    2,054       1.022      1.025
+v1.gomail-2_step02         rich    11,731   12,141   11,956       1.019      0.985
+v1.gomail-2_step03         lean       873      871      873       1.000      1.002
+v1.gomail-2_step03         rich     9,433    9,470    9,523       1.010      1.006
+v1.staynb-1_step00         lean     1,231    1,244    1,242       1.009      0.998
+v1.staynb-1_step00         rich    11,734   12,570   11,858       1.011      0.943
+v1.staynb-1_step02         lean     2,309    2,322    2,330       1.009      1.003
+v1.staynb-1_step02         rich    11,738   12,382   11,979       1.021      0.967
+TOTAL                              51,696   53,644   52,458       1.015      0.978
+```
+
+`cl100k_base` **understates** z.ai's count by 1.5% in aggregate and by at most
+2.2% on any single rendering. `o200k_base` overstates by 2.2% in aggregate and
+swings wider per case (0.943 to 1.025), so `cl100k_base` is the encoding this
+project uses. The 2.2% worst case is where `MEASURED_LOCAL_UNDERCOUNT` comes
+from, and the largest provider-side count observed after applying it is **11 979
+tokens — under the 12 000 the claim states**. The disagreement is reported here
+rather than resolved in the flattering direction.
+
+**This is not the same measurement as entry 4's 20 931 tokens, and the two must
+not be mixed.** That figure was z.ai's `usage` summed over a whole episode —
+every prompt, every completion, all nine steps of `v1.gomail-2`. It was never a
+local count of one observation. Two different accounting lines survive from here
+on: budget accounting is local, deterministic and testable offline; cost
+accounting (`feat-005`) is the provider's `usage` field summed from responses
+that actually happened, and is never estimated locally.
+
+### Tests: 38 of them, and no browser
+
+`tests/test_observation.py` and `tests/test_tokens.py` read the committed
+fixtures and count tokens. They start no browser and make no network call —
+`env -u ZAI_API_KEY uv run pytest tests/test_observation.py tests/test_tokens.py
+-q` gives `38 passed in 2.26s`. `tiktoken`'s BPE file is cached inside the repo
+at `.cache/tiktoken/` (gitignored) so a cleared system temp directory cannot
+silently turn a unit test into a download.
+
+### Out of scope, deliberately
+
+No agent loop, no caps, no retries — `feat-003`. No action parsing: the gate's
+prose-parsed-as-a-multi-action finding lives in `extract_action` on the action
+side and stays there. `runs/` stays gitignored; `fixtures/` is tracked, because
+a capture is evidence and cannot be regenerated identically.

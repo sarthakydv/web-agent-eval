@@ -12,6 +12,13 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "agisdk>=0.3.5",
     "python-dotenv>=1.0.0",
+    # All three arrive with agisdk anyway, but this project imports them
+    # directly — tiktoken for budget accounting, numpy and pillow for the
+    # screenshot side of a captured observation — so they are declared rather
+    # than relied on transitively.
+    "tiktoken>=0.7.0",
+    "numpy>=1.26",
+    "pillow>=10.0",
 ]
 
 [dependency-groups]
