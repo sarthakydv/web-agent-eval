@@ -1,0 +1,68 @@
+{
+  "features": [
+    {
+      "id": "feat-001",
+      "name": "GATE — agisdk + GLM, one task end to end",
+      "description": "[GATE] Run exactly one REAL task end to end with GLM through z.ai and get a score back. This feature exists to answer three questions that the plan could not resolve from documentation, and each answer must be written into docs/DECISIONS.md: (1) does agisdk accept a custom OpenAI-compatible base_url, so z.ai's GLM can drive it? agisdk depends on openai>=1.0.0, which suggests yes, but that is inference and not evidence. (2) Are the 11 replica sites served locally, or hosted at realevals.xyz? This decides how much of the speed gain from leaving the live web is actually realised. (3) Does local scoring require a leaderboard key? STOP AND REPORT if GLM cannot be wired up. Do not silently switch to a paid OpenAI or Anthropic model — that changes the project's cost profile and its subject, and it is a scoping decision for a human. Done when: one task runs, a score is returned, and all three questions are answered with recorded evidence.",
+      "dependencies": [],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-002",
+      "name": "Observation serializer",
+      "description": "Turn an agisdk observation (DOM, accessibility tree, screenshot) into the text the model actually sees. Keep the richness level a parameter rather than a hardcoded choice — feat-007's ablation varies exactly this, and retrofitting a seam later is how ablations end up comparing two things at once. Done when: the same observation renders at two distinct richness levels, both under a stated token budget, with unit tests over the serializer that do not require a browser.",
+      "dependencies": ["feat-001"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-003",
+      "name": "Agent loop with caps",
+      "description": "The loop: observe, decide, act, repeat, terminate. Explicit caps on steps, tokens and wall-clock, each configurable and each recorded when hit. INHERITED LESSON, do not rediscover it: per-operation timeouts are NOT a bound on the whole operation — the archived predecessor sat on one site for nine minutes with every sub-timeout at 45s or less. Only a wall-clock race bounds an action. Done when: each cap can be demonstrated firing independently, the reason for termination is recorded per episode, and hitting a cap ends the episode cleanly rather than hanging.",
+      "dependencies": ["feat-002"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-004",
+      "name": "Task runner over the 112, with resume",
+      "description": "Batch runner across REAL's task set. MUST CHECKPOINT AND RESUME: the archived predecessor lost an eight-hour run that produced nothing because it could not resume after a failure. A task already completed is never re-run on resume, and the runner states how many it skipped. One task's failure never aborts the batch. Done when: a run is killed mid-batch, restarted, and completes without redoing finished tasks or losing recorded results.",
+      "dependencies": ["feat-003"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-005",
+      "name": "Evaluation and cost recording",
+      "description": "Score via agisdk's own programmatic checks rather than a reimplementation, so the number stays comparable to REAL's published baseline. Record TOKENS PER TASK from the provider's usage numbers, summed from actual responses rather than estimated. A dollar figure ONLY if z.ai publishes rates for this plan — if it does not, record that it does not and report tokens alone. The sibling project hit this exact question and correctly refused to invent a rate. Done when: a small batch produces per-task pass/fail plus per-task token counts, and the aggregate is reproducible from the stored per-task records.",
+      "dependencies": ["feat-004"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-006",
+      "name": "Full 112-task run",
+      "description": "[LONG] The headline measurement. Runs for hours unattended — start it and go work on the sibling project. Report the success rate over all 112 tasks with its n stated, and state it beside REAL's published <=41% baseline. If any task is excluded, publish the count and the reason next to the number; never quote a rate whose denominator is unstated. Done when: the full set has run to completion, the score is recorded in docs/DECISIONS.md with the run's date and model, and the per-task records are stored.",
+      "dependencies": ["feat-005"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-007",
+      "name": "Ablation — observation richness",
+      "description": "Run the task set at two observation richness levels and report the difference in success rate. This is the argument for the whole migration: REAL's sites are deterministic, so both arms see byte-identical pages and the difference between them is the thing you changed — on the live web, page variance between arms would have been a confounder sitting on top of the effect. Report both arms with their n, and state the comparison honestly if the difference is small or zero. Done when: both arms have run over the same task set and the delta is recorded with both raw numbers.",
+      "dependencies": ["feat-006"],
+      "status": "not-started",
+      "evidence": ""
+    },
+    {
+      "id": "feat-008",
+      "name": "README with honest limitations",
+      "description": "Write the README: what this is, how to run it, what was measured, and what it does NOT claim — including that 'unseen real sites' is explicitly not claimed, and that a success rate on deterministic replicas is not comparable to one on the live web. Every number traces to a docs/DECISIONS.md entry produced by something that ran; if a number cannot be traced, it does not go in. Include a minimal way to view a stored trace — no separate viewer feature. Done when: the README is written, every figure in it resolves to a DECISIONS entry, and no bracketed placeholder survives anywhere in the repo.",
+      "dependencies": ["feat-007"],
+      "status": "not-started",
+      "evidence": ""
+    }
+  ]
+}

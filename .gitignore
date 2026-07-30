@@ -1,0 +1,15 @@
+# Secrets. Never tracked — init.sh fails the run if one ever is.
+.env
+
+# Environment and caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Run artifacts. Traces and results are large and regenerable; the numbers that
+# matter get written into docs/DECISIONS.md, not left here.
+runs/
+
+.DS_Store
