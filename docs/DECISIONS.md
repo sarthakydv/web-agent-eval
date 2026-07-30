@@ -640,3 +640,9 @@ root commit's `progress.md`; the commit whose only content was removing that lin
 became empty and was pruned. The published tree is byte-identical to the
 pre-rewrite tree — both hash to `cc8e3e5351e37ea52b1a30de103ef3118befdcaf` — so
 the rewrite changed one intermediate state and no published content.
+
+The pre-rewrite refs (`refs/original/*` and a backup branch) were then deleted,
+the reflog expired and `git gc --prune=now` run, after confirming that each old
+commit was content-identical to its rewritten counterpart except the root's single
+deleted line, that nothing was unpushed, and that no stash existed. `main` is now
+the only local branch, so no `git push --all` can publish an unintended ref.

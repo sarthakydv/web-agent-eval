@@ -136,11 +136,11 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
 
 ## Notes for Next Session
 
-**One cleanup is outstanding.** The pre-rewrite refs are still local:
-`refs/original/refs/heads/main` and the `backup-pre-rewrite` branch, both at the
-old `e630a16`. They are not reachable from `main` and were not pushed, but a
-future `git push --all` or `--mirror` would publish them. Delete both and `gc`
-once the rewrite is trusted.
+**The pre-rewrite refs are gone.** `refs/original/*` and `backup-pre-rewrite` were
+deleted, the reflog expired and `git gc --prune=now` run, after verifying that
+every old commit was content-identical to its rewritten counterpart except the
+root's one deleted line. `main` is the only local branch; a `git push --all` can
+no longer publish anything unintended.
 
 Setup gained one step: **`uv run playwright install chromium`**. `agisdk` pins
 Chromium build 1228 and a mismatched build fails the run with an error that

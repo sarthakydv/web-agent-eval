@@ -135,10 +135,9 @@ Entry 6 covers the serializer and token accounting; 1–5 predate it.
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
 4. Take `feat-003` and nothing else.
-5. Outstanding cleanup, not blocking: `refs/original/refs/heads/main` and the
-   `backup-pre-rewrite` branch still hold the pre-rewrite history at `e630a16`.
-   Unreachable from `main` and not pushed, but a `git push --all` or `--mirror`
-   would publish them. Delete both and `gc` once the rewrite is trusted.
+
+Nothing is outstanding. `main` is the only local branch, the pre-rewrite refs have
+been deleted and garbage-collected, and `main == origin/main`.
 
 ## Recommended Next Step
 
