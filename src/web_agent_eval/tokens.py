@@ -49,6 +49,21 @@ def _encoder(name: str):
     return tiktoken.get_encoding(name)
 
 
+def make_encoder(encoding: str | None = None):
+    """A tokenizer handle for one owner to keep — the per-episode path.
+
+    `count_tokens` goes through a process-wide `lru_cache`, which `feat-003`'s
+    loop deliberately does not rely on: an episode owns its own counter so that
+    three concurrent episodes share no mutable state. tiktoken keeps a registry
+    of its own behind `get_encoding`, so the object handed back may still be
+    shared — that is safe, and it is stated rather than glossed, because a
+    `tiktoken.Encoding` is immutable and carries no per-caller state. What must
+    not be shared is the *count*, and that lives on the ledger, not here.
+    """
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return tiktoken.get_encoding(encoding or encoding_name())
+
+
 def count_tokens(text: str, encoding: str | None = None) -> int:
     """Local token count of `text`. Approximate for GLM — see the module docstring."""
     return len(_encoder(encoding or encoding_name()).encode(text, disallowed_special=()))

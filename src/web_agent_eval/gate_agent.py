@@ -10,42 +10,15 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import re
 from pathlib import Path
 
 from agisdk.REAL.browsergym.core.action.highlevel import HighLevelActionSet
-from agisdk.REAL.browsergym.core.action.parsers import highlevel_action_parser
 from agisdk.REAL.browsergym.experiments import AbstractAgentArgs, Agent
 
 from web_agent_eval import glm
+from web_agent_eval.action import extract_action
 
-_FENCE = re.compile(r"```(?:python)?\s*(.+?)\s*```", re.DOTALL)
-
-
-def extract_action(text: str) -> str:
-    """Pull exactly one action call out of the model's narration.
-
-    Handing browsergym the raw reply does not work, and the failure is not
-    obvious. Its parser scans the WHOLE string, pyparsing skips whitespace, and
-    a second match is rejected as a multi-action — so ordinary English prose
-    parses as a function call:
-
-        "The first email's checkbox is already checked (checked='true')."
-                                              -> checked('true')
-        'I am viewing the first email ("Your Account Statement is Ready")'
-                                              -> email('Your Account Statement is Ready')
-
-    Both of those really did abort a step in the first gate run. The last call
-    in the reply is the intended action; everything before it is prose.
-    """
-    fenced = _FENCE.findall(text)
-    candidate = fenced[-1] if fenced else text
-    calls = [call for match in highlevel_action_parser.search_string(candidate).as_list()
-             for call in match]
-    if not calls:
-        return candidate.strip()
-    name, args = calls[-1]
-    return f"{name}(" + ", ".join(repr(arg) for arg in args) + ")"
+__all__ = ["SYSTEM_PROMPT", "GateAgent", "GateAgentArgs", "extract_action"]
 
 SYSTEM_PROMPT = """\
 You are a web agent. You are given a goal, the accessibility tree of the current

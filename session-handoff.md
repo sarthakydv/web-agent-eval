@@ -4,158 +4,173 @@
 
 - **Goal:** Measure a web agent on REAL (112 tasks, 11 deterministic replica
   sites) with every number traceable to something that actually ran.
-- **Current status:** `feat-001` `[GATE]` **passed** and `feat-002` **done**. One
-  REAL task ran end to end on GLM and scored **1.0**; the observation serializer
-  now renders that kind of observation at a parameterised richness level under a
-  measured token budget. The agent loop is not built. Next is `feat-003`.
+- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` **done**,
+  `feat-003` **done**. One REAL task ran end to end on GLM and scored **1.0**;
+  the observation serializer renders that kind of observation at a parameterised
+  richness level under a measured token budget; and the episode loop now runs
+  observe → decide → act → terminate under three independent caps, each of which
+  ends the episode cleanly and says which one fired. The batch runner is not
+  built. Next is `feat-004`.
 - **Branch / commit:** `main`, tracking `origin/main` at
   `github.com/sarthakydv/web-agent-eval` (**public**). CI green.
 
-## Completed This Session (harness validation and first public push)
+## Completed This Session (`feat-003` — the episode loop with caps)
 
-No feature work. `feat-003` was not started and `src/` and `scripts/` were not
-touched.
+- [x] **`src/web_agent_eval/episode.py`** — `run_episode()`: reset, then observe
+      → decide → act until the environment terminates or a cap fires. It takes
+      an `env_factory` and a `policy_factory` and calls them **inside** the
+      episode, returns one `EpisodeRecord`, and **never raises**.
+- [x] **`src/web_agent_eval/caps.py`** — `Caps`, `Deadline`, `TokenLedger`,
+      `BoundedRunner`, `CapHit`. One set per episode; nothing module-level and
+      mutable, nothing cached across episodes.
+- [x] **`src/web_agent_eval/policy.py`** — `GlmPolicy`, the decide half. Takes a
+      `Richness` (does not pick one), sends `thinking: disabled` and
+      `max_tokens=1024` on every call, and extracts one action from the reply.
+- [x] **`src/web_agent_eval/environment.py`** — `AgisdkEnvironment`, a thin
+      adapter over the raw gym env `agisdk` builds. **Exercised by no test** —
+      see Blockers.
+- [x] **`src/web_agent_eval/action.py`** — `extract_action` moved out of
+      `gate_agent.py`. Entry 6 says it lives on the action side; it is not gate
+      scaffolding, and `tests/test_gate_agent.py` covers it unchanged.
+- [x] **`scripts/cap_budget.py`** — derives the token cap offline, and exits
+      non-zero if the chosen cap could bite on an honest episode.
+- [x] **30 new tests**, none of which start a browser, make a network call or
+      need an API key.
 
-- [x] **The three tracker rules are enforced and each was proven to bite.**
-      `init.sh` fails on a missing `verification` command, a `done` feature with
-      empty `evidence`, and two features `in-progress`. Each was broken in a
-      scratch copy, confirmed to exit **1** with a message naming the problem,
-      then restored and checksum-verified. `ci.yml` holds a second copy of the
-      same logic, extracted verbatim and tested against the same three files.
-- [x] **`.github/workflows/ci.yml`** — the offline half of `init.sh`, all six
-      steps run locally as written before pushing, and green on the first CI run.
-- [x] **Pre-push audit of a repo that had never been public.** No key and no
-      `.env`/`.dev.vars`/credential blob anywhere in history, including inside the
-      gzipped and PNG fixtures once decompressed; no `Co-Authored-By` and no agent
-      named on any commit; all four commits authored by Sarthak.
-- [x] **History rewritten once before the first push** to drop one out-of-scope
-      line from the root commit's `progress.md`. The commit whose only content was
-      removing that line became empty and was pruned, leaving 4 commits. The
-      published tree is byte-identical to the pre-rewrite tree (both
-      `cc8e3e5351e37ea52b1a30de103ef3118befdcaf`).
-- [x] **`docs/DECISIONS.md` entries 7 and 8** — the run loop `feat-004` must
-      implement, and the harness change with its broken-gate output.
+## The wall-clock cap bounds the step, not the gap between steps
 
-## Previous Session (`feat-002`)
+The inherited lesson, and the reason the loop has the shape it does. **Two ways
+to get it wrong were available and both are closed:**
 
-- [x] **`src/web_agent_eval/observation.py`** — one direction, observation to
-      text. `Richness` is a frozen dataclass and `serialize(obs, level)` takes
-      one, so `feat-007` varies a data object rather than a branch. A
-      caller-defined level needs no change to `serialize()`, and a test asserts
-      that.
-- [x] **Two levels ship.** `lean` = visible nodes carrying a bid, no
-      annotations, no HTML. `rich` = every visible node with visibility,
-      clickability and centre coordinates, plus pruned HTML, open tabs, focused
-      element and a screenshot note. On a loaded page `rich` costs 4x-6x `lean`.
-- [x] **Fixtures are real captures, and the gate had left none.** Its four run
-      directories hold `summary_info.json`, `experiment.log`, `exp_args.pkl`,
-      `goal_object.pkl.gz` and `finish_state.json` — no DOM, no accessibility
-      tree, no screenshot. Five observations were captured fresh from live runs
-      on two sites (`scripts/capture_observations.py`) and committed under
-      `fixtures/observations/`.
-- [x] **Token budget stated and measured**, in both units — see the table below.
-- [x] **38 new tests**, none of which start a browser or need an API key.
+1. Per-operation timeouts do not compose into a bound on the operation — the
+   predecessor sat on one site for nine minutes with every sub-timeout at 45 s
+   or less.
+2. **A cap checked between steps is not a wall-clock cap.** One hanging step
+   sails straight past it, because the check never runs.
 
-## The budget, in the two units it exists in
+So the episode owns a `Deadline`, and every operation — building the policy,
+building the environment, `reset`, `propose`, `step` — is submitted to that
+episode's **own single worker thread** and awaited with
+`future.result(timeout=deadline.remaining())`. One thread, not a pool: agisdk
+drives Playwright's *sync* API, which has thread affinity. The policy's own
+request timeout is **derived from** the same deadline rather than set
+independently of it.
 
-| | |
-|---|---|
-| Claim | **no rendered observation exceeds 12 000 tokens as z.ai counts them** |
-| Enforced locally at | **11 741** `cl100k_base` tokens (12 000 / 1.022) |
-| Why the margin | `cl100k_base` understates z.ai's `prompt_tokens` by up to **2.2%**, measured on 10 real calls |
-| Largest provider count observed | **11 979** ≤ 12 000 |
-| Rejected alternative | `o200k_base` — overstates by 2.2% aggregate and swings 0.943–1.025 per case |
+Python cannot kill the thread it leaves behind. The runner refuses to submit
+anything more once an operation outruns its bound, and the record says
+`cleanup: {"wedged_on": "env.step", "env_closed": false}` rather than claiming a
+clean close. **Entry 7's "workers are processes" is now load-bearing** — process
+exit is what reclaims a wedged browser.
 
-**Method:** two real chat completions per fixture/level, byte-identical apart
-from the observation text, differenced on `prompt_tokens`. Identical framing on
-both sides, so the difference is z.ai's count of exactly what the serializer
-produced. `uv run python scripts/token_check.py` reproduces it.
+## The cap values, and where each came from
 
-**This is not entry 4's 20 931.** That was `usage` summed over a whole 9-step
-episode — prompts and completions — not a local count of one observation. Budget
-accounting (local, offline, testable) and cost accounting (`feat-005`, provider
-`usage` only) stay separate from here on.
+| Cap | Value | Kind | Basis |
+|---|---|---|---|
+| `max_steps` | **25** | decision | agisdk's harness default; the gate's successful episode took 9 (entry 4) |
+| `max_tokens` | **400 000** | **derived** | `scripts/cap_budget.py` — worst honest episode 354 350 provider tokens, **1.13x** headroom |
+| `max_wall_clock_s` | **300** | decision | gate episode 35.4 s / 9 calls; site round trips 0.13–2.37 s; ~3x expected worst case |
+
+The token cap had to be derived rather than chosen: entry 9 measured reasoning
+spend **scaling with the token cap**, which makes it an input to claim 2 (tokens
+per task), not only a safety bound. The requirement is that it **never bites on
+an honest episode** — a cap that fired on the rich arm and not the lean one would
+truncate one side of `feat-007`'s ablation. **It is held constant across every
+arm**, along with `max_tokens=1024` and `thinking: disabled`.
+
+**The cap is enforced on z.ai's own `usage`.** Every completion returns one
+(entry 4). Only when a response arrives without `usage` is the cost
+reconstructed locally and marked up by entry 6's measured **1.022** worst-case
+undercount, so the fallback errs toward charging more than the provider would.
+The record reports `provider_tokens`, `local_tokens` and `charged` separately.
 
 ## Verification Evidence
 
 | Check | Command | Result |
 |---|---|---|
-| Two levels, one budget | `uv run python scripts/render_observation.py` | 10 rows, all `ok=True`; `lean` 88–2 309, `rich` 550–11 738 tokens |
-| Local vs provider count | `uv run python scripts/token_check.py` | `glm/cl100k` = 1.015 aggregate, 1.022 worst case |
-| No browser, no key | `env -u ZAI_API_KEY uv run pytest tests/test_observation.py tests/test_tokens.py -q` | `38 passed in 2.26s` |
+| **`feat-003` verification** | `uv run pytest -q -k caps` | `25 passed, 51 deselected in 1.31s` |
+| Cap derivation | `uv run python scripts/cap_budget.py` | worst honest episode `354,350`; cap `400,000`; headroom `1.13x`; `OK` |
+| No browser, no key | `env -u ZAI_API_KEY uv run pytest -q` | `76 passed in 2.91s` |
 | Lint | `uv run ruff check .` | `All checks passed!` |
-| Full path | `./init.sh` | `46 passed`, `=== All checks passed ===` |
+| Full path | `./init.sh` | `76 passed`, `=== All checks passed ===` |
+
+Each cap fires in isolation, each has a **control asserting it does not fire**
+when it should not, and the wall-clock case asserts on **elapsed time** — a test
+that only read the returned reason would pass even if the loop hung for nine
+minutes first.
+
+### Four deliberate breaks, to prove the suite is not vacuous
+
+| Break | Result |
+|---|---|
+| `future.result()` with no timeout | `test_..._bound_the_step_itself` fails: **"the loop took 20.1s to give up"** |
+| charge the raw local count, no margin | fails: `assert 10000 == (1022 * 10)` |
+| let `WallClockExceeded` escape the loop | 2 wall-clock tests fail; the cap is recorded as `errored` |
+| step cap `>` instead of `>=` | 3 tests fail: "steps cap: 3 steps against a limit of 2" |
 
 ## Decisions Made
 
-Entries 7 and 8 appended this session; 1–6 predate it.
+Entry 11 was appended this session; 1–10 predate it.
 
-7. **The run loop** — a manifest frozen before the first task that names its own
-   population, provider errors recorded as non-terminal and never scored as task
-   failures, attempts that append with the rate read from each task's first
-   terminal attempt, and a supervisor with three machine-checkable exits (0 all
-   terminal, 1 stalled, 2 budget exceeded). Decided before `feat-004` exists
-   because none of it can be applied honestly after seeing results.
-8. **The tracker enforces its own rules**, with the broken-gate output recorded;
-   CI runs the offline half of `init.sh`; and two ways a scan reported "clean"
-   while it was not — `grep` here is ugrep and honours `.gitignore`, and
-   `git grep -E` has no `\b` word boundary. Both were caught only by running a
-   positive control before trusting a negative.
+11. **The episode loop and its three caps.** Why the deadline bounds the step
+    itself and what that costs (a thread Python cannot kill, reported rather
+    than hidden); the token cap enforced on the provider's numbers with the
+    measured margin on the fallback only; the derivation of 400 000 and why it
+    is set clear of the worst case rather than tight to it; the three outcomes
+    and the rule that one is always recorded; the fixed precedence when two caps
+    cross at once; and the concurrency-safety properties `feat-004` depends on.
 
-Entry 6 covers the serializer and token accounting; 1–5 predate it.
-
-6. **The serializer, its richness seam and the token accounting.** Why the
-   fixtures had to be captured rather than reused; what the two levels differ in
-   and what they deliberately do not (goal, URL and last-action error render at
-   every level, because dropping them changes the task rather than the richness);
-   the screenshot contributes its dimensions and nothing else, because `glm-4.6`
-   via z.ai is text-only; and the measured disagreement between the local
-   tokenizer and the provider's own count.
+Entry 7 is the one to read **before writing any of `feat-004`**: frozen
+manifest, provider errors that are not task failures, attempts that append with
+the rate read from each task's first terminal attempt, and a supervisor with
+three machine-checkable exits.
 
 ## Blockers / Risks
 
+- **`AgisdkEnvironment` is exercised by no test.** It needs a browser and the
+  hosted sites, and `feat-003`'s tests run against fakes on purpose — the caps
+  are the subject, and a browser would make the wall-clock case slow and flaky.
+  **`feat-004` should run one real task through `run_episode` before a batch.**
+  This is stated in entry 11 rather than left implied by its presence.
 - **`feat-006`'s denominator is 102, not 112.** `evals-omnizon.vercel.app` is
   DMCA-taken-down (451). The count and reason must be published beside any rate.
-  Nothing in `feat-002` works around it — entry 5, and it is a human decision.
 - **`feat-005` has an unanswered cost question**: 60 of 112 tasks are graded by
-  an OpenAI `gpt-4.1` judge, not by z.ai. 47 tasks are both reachable and
+  an OpenAI `gpt-4.1` judge (entry 10), not by z.ai. 47 are both reachable and
   scorable with z.ai alone.
-- **`rich` truncates on large pages.** On both staynb fixtures the budget binds
-  and lines are dropped (reported per section, never silently). That is a real
-  property of the arm `feat-007` will compare, not a bug to hide.
+- **Entry 7's concurrency limit of 3 is z.ai's *published* pay-as-you-go
+  number** and this is a Coding Plan key. Probe it before the full run; a
+  concurrency rejection is a `provider_error`, never a task failure.
+- **`rich` truncates on large pages** (reported per section, never silently).
+  A real property of the arm `feat-007` compares, not a bug.
 - **Replica sites are easier than live ones.** A score here is not comparable to
   a live-web score.
 
 ## Next Session Startup
 
-1. Read `AGENTS.md`, then `feature_list.json`, then `docs/DECISIONS.md` —
-   **entry 7 before writing any of `feat-004`**.
-2. Run `./init.sh` — expect `46 passed` and all checks passed.
+1. Read `AGENTS.md`, then **only `feat-004`'s entry** in `feature_list.json`,
+   then the index at the top of `docs/DECISIONS.md` — **entry 7 before writing
+   any of `feat-004`**, plus entry 11 for the loop it wraps. Neither file is
+   read end to end.
+2. Run `./init.sh` — expect `76 passed` and all checks passed.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
-4. Take `feat-003` and nothing else.
+4. Take `feat-004` and nothing else.
 
-Nothing is outstanding. `main` is the only local branch, the pre-rewrite refs have
-been deleted and garbage-collected, and `main == origin/main`.
+Nothing is outstanding. `main` is the only local branch and `main == origin/main`.
 
 ## Recommended Next Step
 
-`feat-003`, the agent loop with caps. Four things carry into it:
+`feat-004`, the batch runner and supervisor. Four things carry into it:
 
-- **Only a wall-clock race bounds an action.** Per-operation timeouts do not —
-  the predecessor sat on one site for nine minutes with every sub-timeout at
-  45 s or less.
-- **Extract the action; never hand browsergym the raw reply** — its parser turns
-  English prose into function calls. `extract_action` and its regression tests
-  already exist and stay on the action side.
-- **`glm-4.6` needs `extra_body={"thinking": {"type": "disabled"}}`** or it
-  spends the whole `max_tokens` budget on reasoning it never returns.
-- **Call `serialize(obs, level)` and do not run agisdk's
-  `default_obs_preprocessor`** — it deletes `axtree_object` and `dom_object`.
-  The serializer falls back to a pre-flattened tree and labels it in the text,
-  but a fallback is not the richness level the ablation asked for.
-
-`src/web_agent_eval/gate_agent.py` is still gate scaffolding. Its 12 000-*char*
-axtree truncation was an arbitrary number; the measured budget that replaces it
-lives in `observation.py`.
+- **Entry 7's rules were decided before it existed and are not to be
+  re-litigated mid-run.** Frozen manifest, `provider_error` as non-terminal,
+  attempts append and the score reads the **first** terminal attempt, supervisor
+  stops on a condition.
+- **Map the loop's three outcomes onto entry 7's four statuses.** `completed` +
+  reward → `passed`/`failed`; `capped` is **counted and published separately**;
+  `errored` as-is. The cap reason is already machine-readable:
+  `{"cap": "wall_clock", "limit": 300.0, "observed": 300.4, "unit": "seconds"}`.
+- **Workers are processes, not threads.** Playwright thread affinity, and
+  process exit is what reclaims a browser left wedged by a wall-clock cap.
+- **`run_episode` writes only where the caller says.** Give each episode its own
+  path under `runs/<run-id>/` so three concurrent workers cannot collide.

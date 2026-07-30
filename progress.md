@@ -3,10 +3,13 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001` and `feat-002` are done, next is `feat-003`
-**Status:** the `[GATE]` is through (one REAL task scored **1.0**) and the
-observation serializer exists, with richness as a parameter and a measured token
-budget. The agent loop and its caps are not built. The repo is now **public** at
+**Active Feature:** none — `feat-001`, `feat-002` and `feat-003` are done, next
+is `feat-004`
+**Status:** the `[GATE]` is through (one REAL task scored **1.0**), the
+observation serializer exists with richness as a parameter and a measured token
+budget, and the **episode loop is built and bounded** — steps, tokens and wall
+clock, each firing on its own and each recorded when it does. The batch runner
+and supervisor are not built. The repo is **public** at
 `github.com/sarthakydv/web-agent-eval` with CI green.
 
 ## Status
@@ -37,8 +40,32 @@ budget. The agent loop and its caps are not built. The repo is now **public** at
       Counted with `tiktoken`/`cl100k_base` and checked against z.ai's own
       `prompt_tokens` on 10 real calls: local understates by 1.5% aggregate,
       2.2% worst case. Largest provider-side rendering measured: 11 979.
-- [x] 46 tests passing; the 38 serializer/token tests run with no browser and
-      no API key.
+- [x] **`feat-003` done.** `src/web_agent_eval/episode.py` is the loop:
+      observe, decide, act, terminate, under three independent caps
+      (`caps.py`), with a GLM policy (`policy.py`) and a thin agisdk env
+      adapter (`environment.py`). `docs/DECISIONS.md` entry 11.
+- [x] **The wall-clock cap bounds the step itself, not the gap between steps.**
+      Every operation runs on the episode's own worker thread and is awaited
+      with the time left on the episode deadline, so a hanging step costs the
+      budget and not a minute more. The test asserts on **elapsed time**:
+      20 s of faked hang against a 0.2 s budget returns in under 2 s.
+- [x] **Cap values, derived not guessed.** 25 steps / 400 000 provider tokens /
+      300 s. `uv run python scripts/cap_budget.py` derives the token cap from
+      the worst honest episode (354 350) and reports the headroom (1.13x); a
+      cap that bit on the rich arm and not the lean one would confound
+      `feat-007`.
+- [x] **The token cap is enforced on z.ai's own `usage`**, falling back to a
+      local count marked up by entry 6's measured 2.2% undercount only when a
+      response arrives without one. The record keeps the two apart.
+- [x] **Every episode records why it ended** — `completed`, `capped` (which cap,
+      what limit, what observed value) or `errored`. Nothing escapes to the
+      caller; a cap is never an exception.
+- [x] **Safe for three concurrent episodes in three processes** (entry 7's
+      limit). No module-level mutable state, no cached singletons, per-episode
+      clocks and counters, caller-supplied output paths, task id on every log
+      line. Two concurrent episodes against fakes are asserted independent.
+- [x] 76 tests passing; all of them run with no browser, no network and no
+      API key.
 - [x] **The tracker enforces its own rules, and each was tested by breaking it.**
       `init.sh` fails on a feature with no `verification` command, a `done`
       feature with empty `evidence`, and more than one feature `in-progress`. All
@@ -53,21 +80,26 @@ budget. The agent loop and its caps are not built. The repo is now **public** at
 
 ### What's In Progress
 
-- Nothing. Stopped after `feat-002` as instructed. `feat-003` is not started.
+- Nothing. Stopped after `feat-003` as instructed. `feat-004` is not started.
 
 ### What's Next
 
-1. `feat-003` — the agent loop with caps on steps, tokens and wall-clock. Only a
-   wall-clock race bounds an action; per-operation timeouts do not.
-2. Two things `feat-003` inherits from the gate and must not
-   rediscover — both are in DECISIONS entry 4:
-   - **Extract the action; never hand browsergym the raw reply.** Its parser
-     scans the whole string and pyparsing skips whitespace, so prose like
-     `"the checkbox is already checked (checked='true')"` parses as a call and
-     kills the step. Regression tests are in `tests/test_gate_agent.py`.
-   - **`glm-4.6` reasons by default** and will burn the whole `max_tokens`
-     budget on thinking it never returns. Send
-     `extra_body={"thinking": {"type": "disabled"}}`.
+1. `feat-004` — the batch runner and supervisor over the 112 (102 reachable),
+   with resume. **Its rules are already decided in DECISIONS entry 7 and must
+   not be re-litigated mid-run:** frozen manifest, provider errors that are not
+   task failures, attempts that append and score the first terminal attempt, and
+   a supervisor that stops on a machine-checkable condition.
+2. `feat-004` consumes `run_episode()` and must map its three outcomes onto
+   entry 7's four terminal statuses: `completed` + reward → `passed`/`failed`,
+   `capped` counted and published **separately**, `errored` as-is. The cap
+   reason is already machine-readable: `{"cap": "wall_clock", "limit": 300.0,
+   "observed": 300.4, "unit": "seconds"}`.
+3. **Workers are processes, not threads** (entry 7): Playwright's sync API has
+   thread affinity, and a process boundary is what reclaims a browser left
+   wedged by a wall-clock cap. The loop reports `cleanup.wedged_on` when that
+   happens rather than claiming a clean close.
+4. **Probe the real concurrency limit before the full run.** Entry 7's 3 is
+   z.ai's *published* pay-as-you-go number and this is a Coding Plan key.
 
 ## Blockers / Risks
 
@@ -103,10 +135,29 @@ budget. The agent loop and its caps are not built. The repo is now **public** at
 - **Tokens: local `cl100k_base` for budgets, provider `usage` for cost.** The
   local count was measured against z.ai's own and understates it by up to 2.2%;
   the budget absorbs that rather than ignoring it — entry 6.
+- **A cap checked between steps is not a wall-clock cap.** The episode owns a
+  deadline and every operation is awaited with the time left on it — entry 11.
+- **The token cap is enforced on the provider's numbers**, with the measured
+  2.2% markup applied only on the local fallback — entry 11.
+- **Cap values are held constant across every arm** of `feat-006` and
+  `feat-007`, because entry 9 measured reasoning spend scaling with the cap —
+  entry 11.
+- **When two caps cross at once the order is fixed**: wall clock, then tokens,
+  then steps — entry 11.
+- **`completed` is not `passed`.** The loop decides the two outcomes it honestly
+  can and hands the reward to `feat-004`/`feat-005` for the rest — entry 11.
 
 ## Files Modified This Session
 
-Harness validation and first public push — **no feature work**, and `src/` and
+`feat-003`, the episode loop: `src/web_agent_eval/{episode,caps,policy,
+environment,action}.py` (new), `src/web_agent_eval/tokens.py` (added
+`make_encoder`, the per-episode handle), `src/web_agent_eval/gate_agent.py`
+(`extract_action` moved to `action.py`; it is not gate scaffolding and entry 6
+says it lives on the action side), `tests/{test_caps,test_policy}.py` (new),
+`scripts/cap_budget.py` (new), `feature_list.json`, `docs/DECISIONS.md`
+(entry 11), `progress.md`, `session-handoff.md`.
+
+Previous session — harness validation and first public push — **no feature work**, and `src/` and
 `scripts/` were not touched: `feature_list.json` (a `verification` command on all
 8 features, `verification_required`, `feat-004` widened to cover the supervisor,
 `feat-006` required to name its population), `init.sh` (the three tracker rules),
@@ -130,7 +181,13 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
       all five fixtures under budget; `rich` is 4x-6x `lean` on a loaded page.
 - [x] Token count checked against the provider: `uv run python
       scripts/token_check.py` → `glm/cl100k` ratio 1.015 aggregate, 1.022 worst.
-- [x] Tests pass: `uv run pytest -q` → `46 passed in 2.15s`
+- [x] `feat-003` verification: `uv run pytest -q -k caps` → `25 passed, 51
+      deselected in 1.31s`; each cap fires in isolation, each has a control that
+      asserts it does *not* fire, and the wall-clock case asserts on elapsed
+      time. Four deliberate breaks confirmed the suite is not vacuous — entry 11.
+- [x] Cap derivation: `uv run python scripts/cap_budget.py` → worst honest
+      episode 354 350 provider tokens against a 400 000 cap, 1.13x headroom.
+- [x] Tests pass: `uv run pytest -q` → `76 passed in 2.96s`
 - [x] Lint clean: `uv run ruff check .` → `All checks passed!`
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
 
@@ -146,15 +203,20 @@ Setup gained one step: **`uv run playwright install chromium`**. `agisdk` pins
 Chromium build 1228 and a mismatched build fails the run with an error that
 looks nothing like a version problem.
 
-`src/web_agent_eval/gate_agent.py` is still gate scaffolding, not the project's
-agent. `feat-003` owns the loop and its caps and owes it nothing — its
-12 000-char axtree truncation in particular was an arbitrary number, and the
-measured budget that replaces it lives in `observation.py`.
+`src/web_agent_eval/gate_agent.py` is still gate scaffolding and is now used by
+nothing but `scripts/run_gate.py`. The project's agent is `policy.GlmPolicy`
+driven by `episode.run_episode`; only `extract_action` survived from the gate,
+and it moved to `action.py`.
 
-`feat-003` should call `serialize(obs, level)` and must **not** run agisdk's
-`default_obs_preprocessor`, which deletes `axtree_object` and `dom_object`. The
-serializer falls back to a pre-flattened tree and says so in the text, but a
-fallback is not the richness level anyone asked for.
+`AgisdkEnvironment` does **not** run agisdk's `default_obs_preprocessor` — it
+deletes `axtree_object` and `dom_object`, and the serializer's fallback to a
+pre-flattened tree is not the richness level `feat-007` asked for. It also
+leaves gym's `max_episode_steps` unset on purpose: the `TimeLimit` wrapper would
+record a wrapper truncation as `completed`/`truncated` rather than `capped`.
+
+`AgisdkEnvironment` is the one piece **no test exercises** — it needs a browser
+and the hosted sites. `feat-004`'s first run is its first real exercise, and it
+should be run on one task before a batch.
 
 Two accounting lines exist now and must never be mixed: **budget accounting** is
 local `tiktoken` over a rendered observation; **cost accounting** (`feat-005`) is

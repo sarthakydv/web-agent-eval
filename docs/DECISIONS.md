@@ -17,6 +17,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **8** (2026-07-31) — The tracker enforces its own rules, and each rule was tested by breaking it
 - **9** (2026-07-31) — What this key actually serves: `glm-5.1` is not one of the things
 - **10** (2026-07-31) — The agent is GLM; the scorer is REAL's own judge
+- **11** (2026-07-31) — `feat-003`: the episode loop, and the three caps it is bounded by
 
 <!-- INDEX:END -->
 
@@ -841,3 +842,194 @@ REAL's judge.
 
 The key is a placeholder in `.env` until it is filled. Empty means unset, and
 the SDK raises a clear error rather than failing quietly.
+
+---
+
+## 11 — `feat-003`: the episode loop, and the three caps it is bounded by
+
+**Date:** 2026-07-31
+**Reproduce:** `uv run pytest -q -k caps` (offline, no browser, no network),
+`uv run python scripts/cap_budget.py` (offline, derives the token cap)
+
+The loop is `run_episode()` in `src/web_agent_eval/episode.py`: reset, then
+observe → decide → act until the environment says it is done or one of three
+caps fires. It runs one task, returns one record, and never raises.
+
+### The wall-clock cap bounds the step, not the gap between steps
+
+This is the inherited lesson (AGENTS.md, lesson 1) and it is the whole reason
+the loop has the shape it does. The predecessor sat on one site for **nine
+minutes with every sub-timeout at 45 s or less**. Two ways to get that wrong
+were available here and both are closed:
+
+1. Per-operation timeouts do not compose into a bound on the operation.
+2. **A cap checked between steps is not a wall-clock cap.** One hanging step
+   sails straight past it, because the check never runs.
+
+So the episode owns a `Deadline` and a `BoundedRunner`, and every operation —
+building the policy, building the environment, `reset`, `propose`, `step` — is
+submitted to that episode's own worker thread and awaited with
+`future.result(timeout=deadline.remaining())`. Control returns after the budget
+whatever the worker is blocked on. The policy's own request timeout is *derived
+from* the same deadline rather than set independently of it, which is precisely
+what the predecessor did not do.
+
+One worker thread, not a pool: agisdk drives Playwright's **sync** API, which
+has thread affinity, so the browser is constructed on that thread and every
+later call goes to the same one.
+
+**What Python cannot do is kill the thread it left behind.** The runner refuses
+to submit anything else after an operation outruns its bound, and the record
+says `cleanup: {"wedged_on": "env.step", "env_closed": false}` instead of
+claiming a clean close. Entry 7 already puts each episode in its own **process**;
+that is what reclaims a wedged browser, and it is now load-bearing rather than
+incidental.
+
+This was verified by breaking it. Replacing `future.result(timeout=...)` with
+`future.result()` — the "checked between steps" bug, exactly — turns the test
+from green to:
+
+```
+>           assert outer_elapsed < 2.0, f"the loop took {outer_elapsed:.1f}s to give up"
+E           AssertionError: the loop took 20.1s to give up
+E           assert 20.077709792007226 < 2.0
+```
+
+The test asserts on **elapsed time**, not on the returned reason, because a test
+that only reads the reason passes even when the loop hung for nine minutes
+first.
+
+### The token cap is enforced on the provider's numbers
+
+Entry 6 measured `cl100k_base` **understating** z.ai's own `prompt_tokens` by
+1.5% in aggregate and 2.2% at worst, so a cap enforced on a raw local count is
+looser than it reads. Two accounting lines, kept apart in the record:
+
+- **Provider.** Every z.ai chat completion returns `usage` (entry 4), so in
+  normal operation every token charged is a token z.ai counted, uncorrected and
+  unestimated.
+- **Local, only when a response arrives without `usage`.** Reconstructed with
+  `tiktoken` and marked up by `MEASURED_LOCAL_UNDERCOUNT = 1.022` — entry 6's
+  worst case — so the fallback errs toward charging *more* than the provider
+  would rather than less. The record reports `provider_tokens`, `local_tokens`
+  and `charged` separately, so nobody has to guess which path a run took.
+
+### The cap values, and where each comes from
+
+```
+DEFAULT_MAX_STEPS        =      25   decision  agisdk harness default; the gate took 9 (entry 4)
+DEFAULT_MAX_TOKENS       = 400_000   derived   scripts/cap_budget.py, below
+DEFAULT_MAX_WALL_CLOCK_S =     300   decision  ~3x expected worst case; far inside the 9-minute hang
+```
+
+The token cap is the one that had to be derived rather than chosen, because
+entry 9 measured reasoning spend scaling with the token cap — which makes it an
+input to claim 2, tokens per task, not only a safety bound. **Whatever it is, it
+is held constant across every arm of `feat-006` and `feat-007`.**
+
+The requirement it has to satisfy is *never biting on an honest episode*. A cap
+that fires on the rich arm and not the lean one would truncate one side of
+`feat-007`'s ablation and turn it into a comparison of two different
+experiments. `scripts/cap_budget.py` derives the worst case:
+
+```
+system prompt             :     125  local tokens
+action space description  :     561  short form, with examples
+history at the last step  :     430  25 x 17 (longest sampled action)
+section framing           :       9
+observation ceiling       :  11,741  feat-002's local budget (12,000 provider-side)
+
+worst prompt, local       :    12,866
+  x 1.022 (entry 6's worst-case undercount)
+worst prompt, provider    :    13,150
++ completion cap          :     1,024  (thinking disabled, entry 4)
+worst step, provider      :    14,174
+x max_steps               :        25
+worst honest episode      :   354,350  provider tokens
+
+DEFAULT_MAX_TOKENS        :   400,000
+headroom over the worst   :      1.13x
+verdict                   : OK — cannot bite on an honest episode
+```
+
+The completion cap is `max_tokens=1024` with `thinking: disabled`, both sent on
+every call and both held constant across arms for the same reason.
+
+### Every episode records why it ended, always
+
+Three outcomes, and one is always set: `completed` (the environment terminated
+or truncated), `capped`, or `errored`. The outcome is initialised **before** the
+loop starts, so no code path returns a record without one — an episode with no
+recorded reason is a hole in `feat-004`'s accounting.
+
+A cap carries a machine-readable reason naming which cap and at what value:
+
+```json
+{"outcome": "capped", "cap": "wall_clock", "limit": 300.0, "observed": 300.4, "unit": "seconds"}
+```
+
+`completed` is deliberately **not** `passed`. Entry 7 fixes the terminal
+statuses at `passed`, `failed`, `capped` and `errored`; the loop decides the two
+it honestly can and hands over the reward for the other two.
+
+Two caps can cross on the same check, and "whichever the code tested first" is
+not a reason, so the order is fixed: **wall clock, then tokens, then steps.**
+
+`AgisdkEnvironment` deliberately leaves gym's `max_episode_steps` unset. The
+`TimeLimit` wrapper would truncate at its own count, and a wrapper-truncated
+episode records as `completed`/`truncated` rather than `capped` — collapsing the
+distinction entry 7 exists to publish.
+
+### Safe for three concurrent copies, in three processes
+
+Entry 7 caps concurrency at 3 (z.ai's published limit for `glm-4.6`). The
+parallelism is `feat-004`'s, but the loop had to be built for it:
+
+- No module-level mutable state, no cached singleton. The model client, the
+  environment handle and the token encoder are built **per episode**, by
+  factories the caller supplies, called inside the episode.
+- Every cap has its own clock and counters, owned by that episode. There is no
+  global budget — `feat-004` aggregates across episodes; the loop never does.
+- Nothing writes to a fixed path. The output path comes from the caller, or
+  nothing is written at all, so two episodes cannot collide under `runs/`.
+- Every log line carries the task id.
+
+`tests/test_caps.py` runs two episodes concurrently against fakes with different
+caps and asserts each ends on its own cap, at its own limit, having counted only
+its own tokens and steps.
+
+One caveat stated rather than glossed: `tokens.count_tokens` keeps a
+process-wide `lru_cache` of the tiktoken encoder, and `tiktoken.get_encoding`
+has a registry of its own behind it. The episode goes through `make_encoder()`
+and holds its own handle. A `tiktoken.Encoding` is immutable and carries no
+per-caller state, so a shared one is safe; what must not be shared is the
+*count*, and that lives on the per-episode `TokenLedger`.
+
+### Every cap has a control, and each was verified by breaking it
+
+The standing rule (AGENTS.md; entry 8): three caps that always fire look
+identical to three that work. Each cap is asserted **not** to fire when it
+should not — a step cap that does not fire on an episode that finishes first, a
+token cap that does not fire under a generous budget, a wall-clock cap that does
+not fire on a fast episode. And four deliberate breaks were run to confirm the
+suite is not passing vacuously:
+
+| Break | Result |
+|---|---|
+| `future.result()` without a timeout | `test_..._bound_the_step_itself` fails: "the loop took 20.1s to give up" |
+| charge the raw local count, no margin | `test_..._charged_with_the_measured_margin` fails: `10000 == 1022 * 10` |
+| let `WallClockExceeded` escape the loop | 2 wall-clock tests fail; the cap is recorded as `errored` |
+| step cap `>` instead of `>=` | 3 tests fail: "steps cap: 3 steps against a limit of 2" |
+
+### What is out of scope, deliberately
+
+No batch runner, no supervisor, no retries, no manifest — that is `feat-004`,
+and entry 7 already fixes its rules. No scoring — `feat-005`. The empty
+`OPENAI_API_KEY` placeholder in `.env` is entry 10's, for the judge, and nothing
+in this feature reads it.
+
+`AgisdkEnvironment` is thin and is **exercised by no test in this suite**,
+because it needs a browser and the hosted replica sites; `feat-003`'s tests run
+against fakes on purpose, since the caps are the subject and a browser would
+make the wall-clock case slow and flaky. Its first real exercise is `feat-004`'s
+first run. That is stated here rather than implied by its presence.
