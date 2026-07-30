@@ -8,9 +8,35 @@
   REAL task ran end to end on GLM and scored **1.0**; the observation serializer
   now renders that kind of observation at a parameterised richness level under a
   measured token budget. The agent loop is not built. Next is `feat-003`.
-- **Branch / commit:** `main`. No remote yet.
+- **Branch / commit:** `main`, tracking `origin/main` at
+  `github.com/sarthakydv/web-agent-eval` (**public**). CI green.
 
-## Completed This Session (`feat-002`)
+## Completed This Session (harness validation and first public push)
+
+No feature work. `feat-003` was not started and `src/` and `scripts/` were not
+touched.
+
+- [x] **The three tracker rules are enforced and each was proven to bite.**
+      `init.sh` fails on a missing `verification` command, a `done` feature with
+      empty `evidence`, and two features `in-progress`. Each was broken in a
+      scratch copy, confirmed to exit **1** with a message naming the problem,
+      then restored and checksum-verified. `ci.yml` holds a second copy of the
+      same logic, extracted verbatim and tested against the same three files.
+- [x] **`.github/workflows/ci.yml`** — the offline half of `init.sh`, all six
+      steps run locally as written before pushing, and green on the first CI run.
+- [x] **Pre-push audit of a repo that had never been public.** No key and no
+      `.env`/`.dev.vars`/credential blob anywhere in history, including inside the
+      gzipped and PNG fixtures once decompressed; no `Co-Authored-By` and no agent
+      named on any commit; all four commits authored by Sarthak.
+- [x] **History rewritten once before the first push** to drop one out-of-scope
+      line from the root commit's `progress.md`. The commit whose only content was
+      removing that line became empty and was pruned, leaving 4 commits. The
+      published tree is byte-identical to the pre-rewrite tree (both
+      `cc8e3e5351e37ea52b1a30de103ef3118befdcaf`).
+- [x] **`docs/DECISIONS.md` entries 7 and 8** — the run loop `feat-004` must
+      implement, and the harness change with its broken-gate output.
+
+## Previous Session (`feat-002`)
 
 - [x] **`src/web_agent_eval/observation.py`** — one direction, observation to
       text. `Richness` is a frozen dataclass and `serialize(obs, level)` takes
@@ -62,7 +88,21 @@ accounting (local, offline, testable) and cost accounting (`feat-005`, provider
 
 ## Decisions Made
 
-Entry 6 appended to `docs/DECISIONS.md` this session; 1–5 predate it.
+Entries 7 and 8 appended this session; 1–6 predate it.
+
+7. **The run loop** — a manifest frozen before the first task that names its own
+   population, provider errors recorded as non-terminal and never scored as task
+   failures, attempts that append with the rate read from each task's first
+   terminal attempt, and a supervisor with three machine-checkable exits (0 all
+   terminal, 1 stalled, 2 budget exceeded). Decided before `feat-004` exists
+   because none of it can be applied honestly after seeing results.
+8. **The tracker enforces its own rules**, with the broken-gate output recorded;
+   CI runs the offline half of `init.sh`; and two ways a scan reported "clean"
+   while it was not — `grep` here is ugrep and honours `.gitignore`, and
+   `git grep -E` has no `\b` word boundary. Both were caught only by running a
+   positive control before trusting a negative.
+
+Entry 6 covers the serializer and token accounting; 1–5 predate it.
 
 6. **The serializer, its richness seam and the token accounting.** Why the
    fixtures had to be captured rather than reused; what the two levels differ in
@@ -88,12 +128,17 @@ Entry 6 appended to `docs/DECISIONS.md` this session; 1–5 predate it.
 
 ## Next Session Startup
 
-1. Read `AGENTS.md`, then `feature_list.json`, then `docs/DECISIONS.md`.
+1. Read `AGENTS.md`, then `feature_list.json`, then `docs/DECISIONS.md` —
+   **entry 7 before writing any of `feat-004`**.
 2. Run `./init.sh` — expect `46 passed` and all checks passed.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
 4. Take `feat-003` and nothing else.
+5. Outstanding cleanup, not blocking: `refs/original/refs/heads/main` and the
+   `backup-pre-rewrite` branch still hold the pre-rewrite history at `e630a16`.
+   Unreachable from `main` and not pushed, but a `git push --all` or `--mirror`
+   would publish them. Delete both and `gc` once the rewrite is trusted.
 
 ## Recommended Next Step
 

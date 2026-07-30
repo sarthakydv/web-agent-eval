@@ -573,3 +573,70 @@ evaluator here is agisdk's own programmatic checks, which is stronger than a
 model judging a model; keeping it that way means the loop supervises **runs**,
 not **work**. The archived predecessor's rule stands: a model labelling its own
 failures makes the number meaningless.
+
+---
+
+## 8 — The tracker enforces its own rules, and each rule was tested by breaking it
+
+**Date:** 2026-07-31
+**Status:** harness change; no measurement in this entry
+
+`feature_list.json` sets `verification_required` and every feature carries a
+`verification` command written before its work starts. `init.sh` now enforces
+three rules that it previously only described:
+
+1. every feature has a non-empty `verification` command,
+2. a `done` feature has non-empty `evidence`,
+3. at most one feature is `in-progress`.
+
+A status field an agent can set on its own, with no command behind it and no
+output pasted under it, is an opinion. But a rule is only as good as its
+enforcement, so each of the three was **broken deliberately** in a scratch copy
+of `feature_list.json` and confirmed to fail:
+
+```
+(a) verification field deleted    FAIL: no verification field: feat-003
+(b) done, evidence set to ""      FAIL: done with an empty evidence field: feat-001
+(c) two features in-progress      FAIL: one feature at a time, but in-progress: feat-003, feat-004
+```
+
+All three exited **1**, each naming the problem. The file was then restored and
+confirmed byte-identical by checksum. `.github/workflows/ci.yml` carries a second
+copy of the same logic; it was extracted verbatim from the workflow and run
+against the same three broken files, exiting `1` each time and `0` on the real
+file. Validating one copy would have left the other unproven.
+
+### CI runs the offline half of `init.sh`
+
+Everything in the workflow passes with no key, no browser and no network round
+trip to the replica sites: the tracked-`.env` check, the interpreter pin and
+`agisdk` import, `ruff`, the tracker rules, and the test suite with the key
+unset. The parts that need `ZAI_API_KEY` — the gate run, the capture scripts —
+are deliberately excluded, because a CI job that needs a secret to be honest is
+a job that gets skipped.
+
+### Two ways a scan reported "clean" while it was not
+
+Both were caught only because every negative result was preceded by a positive
+control — a search for a string known to be present, to prove the pipeline was
+live before trusting it to find nothing. Recorded here because this repo's whole
+premise is that a check which cannot fail is worse than no check:
+
+- `grep` on the development machine is **ugrep**, which honours `.gitignore`. A
+  recursive secret scan therefore skipped `.env` itself — the one file it most
+  needed to read. Pass filenames explicitly, or `--no-ignore-files`.
+- **`git grep -E` does not support `\b`** as a word boundary (POSIX ERE), so a
+  content scan for `\bcv\b` matched nothing regardless of content. Use
+  `--perl-regexp`, or fixed strings with `-F`. Note also that `git grep -I`
+  skips binary blobs, so the gzipped and PNG fixtures had to be decompressed
+  before they were actually searched.
+
+### The repo is public from this date
+
+First push: `main` at the commit that introduced this entry's harness changes,
+to `github.com/sarthakydv/web-agent-eval`, with CI green on the first run. Before
+that push, history was rewritten once to drop a single out-of-scope line from the
+root commit's `progress.md`; the commit whose only content was removing that line
+became empty and was pruned. The published tree is byte-identical to the
+pre-rewrite tree — both hash to `cc8e3e5351e37ea52b1a30de103ef3118befdcaf` — so
+the rewrite changed one intermediate state and no published content.

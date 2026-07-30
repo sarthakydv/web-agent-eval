@@ -6,7 +6,8 @@
 **Active Feature:** none — `feat-001` and `feat-002` are done, next is `feat-003`
 **Status:** the `[GATE]` is through (one REAL task scored **1.0**) and the
 observation serializer exists, with richness as a parameter and a measured token
-budget. The agent loop and its caps are not built.
+budget. The agent loop and its caps are not built. The repo is now **public** at
+`github.com/sarthakydv/web-agent-eval` with CI green.
 
 ## Status
 
@@ -38,6 +39,17 @@ budget. The agent loop and its caps are not built.
       2.2% worst case. Largest provider-side rendering measured: 11 979.
 - [x] 46 tests passing; the 38 serializer/token tests run with no browser and
       no API key.
+- [x] **The tracker enforces its own rules, and each was tested by breaking it.**
+      `init.sh` fails on a feature with no `verification` command, a `done`
+      feature with empty `evidence`, and more than one feature `in-progress`. All
+      three were broken deliberately in a scratch copy and confirmed to exit 1
+      naming the problem — entry 8. `ci.yml` holds a second copy of the same
+      logic, also tested against the same three broken files.
+- [x] **CI runs the offline half of `init.sh`** on every push and PR — no key, no
+      browser, no network. First run green in 21 s.
+- [x] **Repo is public** at `github.com/sarthakydv/web-agent-eval`. Pre-push
+      scans confirmed no key and no `.env`/credential blob anywhere in history,
+      including inside the gzipped and PNG fixtures — entry 8.
 
 ### What's In Progress
 
@@ -94,7 +106,14 @@ budget. The agent loop and its caps are not built.
 
 ## Files Modified This Session
 
-`src/web_agent_eval/{observation,tokens,fixtures}.py`,
+Harness validation and first public push — **no feature work**, and `src/` and
+`scripts/` were not touched: `feature_list.json` (a `verification` command on all
+8 features, `verification_required`, `feat-004` widened to cover the supervisor,
+`feat-006` required to name its population), `init.sh` (the three tracker rules),
+`AGENTS.md` ("Feature list rules"), `docs/DECISIONS.md` (entries 7 and 8),
+`.github/workflows/ci.yml` (new), `progress.md`, `session-handoff.md`.
+
+Previous session: `src/web_agent_eval/{observation,tokens,fixtures}.py`,
 `scripts/{capture_observations,render_observation,token_check}.py`,
 `tests/{test_observation,test_tokens}.py`, `fixtures/observations/` (5 captures
 plus screenshots), `pyproject.toml`, `.gitignore`, `feature_list.json`,
@@ -116,6 +135,12 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
 
 ## Notes for Next Session
+
+**One cleanup is outstanding.** The pre-rewrite refs are still local:
+`refs/original/refs/heads/main` and the `backup-pre-rewrite` branch, both at the
+old `e630a16`. They are not reachable from `main` and were not pushed, but a
+future `git push --all` or `--mirror` would publish them. Delete both and `gc`
+once the rewrite is trusted.
 
 Setup gained one step: **`uv run playwright install chromium`**. `agisdk` pins
 Chromium build 1228 and a mismatched build fails the run with an error that
