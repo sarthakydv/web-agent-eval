@@ -27,9 +27,13 @@ TRACKED=$(git ls-files 2>/dev/null | grep -E '(^|/)\.env$' || true)
 [ -n "$TRACKED" ] && fail "TRACKING A SECRET FILE: $TRACKED"
 
 if [ -f feature_list.json ]; then
-  python3 - feature_list.json <<'PY'
+  # State report, then the tracker's own rules — see "Feature list rules" in
+  # AGENTS.md. A status field an agent can set on its own, with no verification
+  # command behind it and no output pasted under it, is an opinion.
+  python3 - feature_list.json <<'PY' || fail "feature_list.json broke a tracker rule"
 import json, sys
-feats = json.load(open(sys.argv[1]))["features"]
+data = json.load(open(sys.argv[1]))
+feats = data["features"]
 counts = {}
 for f in feats:
     counts[f["status"]] = counts.get(f["status"], 0) + 1
@@ -42,6 +46,21 @@ nxt = next((f for f in feats if f["status"] == "not-started"
                     for d in f.get("dependencies", []))), None)
 if nxt:
     print(f"  next available: {nxt['id']} {nxt['name']}")
+
+problems = []
+no_ev = [f["id"] for f in feats if f["status"] == "done" and not (f.get("evidence") or "").strip()]
+if no_ev:
+    problems.append("done with an empty evidence field: " + ", ".join(no_ev))
+if data.get("verification_required"):
+    no_v = [f["id"] for f in feats if not (f.get("verification") or "").strip()]
+    if no_v:
+        problems.append("no verification field: " + ", ".join(no_v))
+wip = [f["id"] for f in feats if f["status"] == "in-progress"]
+if len(wip) > 1:
+    problems.append("one feature at a time, but in-progress: " + ", ".join(wip))
+for p in problems:
+    print(f"  FAIL: {p}")
+sys.exit(1 if problems else 0)
 PY
 else
   fail "no feature_list.json"

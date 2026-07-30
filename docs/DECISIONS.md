@@ -488,3 +488,88 @@ No agent loop, no caps, no retries — `feat-003`. No action parsing: the gate's
 prose-parsed-as-a-multi-action finding lives in `extract_action` on the action
 side and stays there. `runs/` stays gitignored; `fixtures/` is tracked, because
 a capture is evidence and cannot be regenerated identically.
+
+---
+
+## 7 — The run loop: what it may retry, and what it may not call a failure
+
+**Date:** 2026-07-31
+**Status:** decided **before** `feat-004` exists, because every rule here is one
+that is impossible to apply honestly after seeing the results.
+
+`feat-006` runs for hours unattended. That makes the batch runner a loop that
+supervises itself, and a self-supervising loop can quietly manufacture a wrong
+number in three ways. Each is closed here.
+
+### The manifest is frozen at run start, and it names its own population
+
+`runs/<run-id>/manifest.json` is written before the first task and never edited:
+the task ids to be attempted, the population they were drawn from, and every
+exclusion with its reason. A denominator that emerges from which tasks happened
+to fail is not a denominator.
+
+Entry 5 leaves **three defensible populations** and the choice belongs to
+`feat-006`, not to the runner:
+
+- **112** — the full v1 set.
+- **102** — reachable; excludes the 10 omnizon tasks (HTTP 451, DMCA takedown).
+- **47** — reachable *and* scorable with no key but z.ai's; the other 60 have at
+  least one `llm_boolean` eval that calls an OpenAI judge (entry 4).
+
+Whichever is run, the manifest records which and why, and the rate is published
+with that `n` beside it.
+
+### A provider error is not a task failure
+
+`429`, `401`, an entitlement change, or a connection reset from z.ai says
+nothing about whether the agent can do the task. The gate already met one of
+these (entry 4: this key gets `429` on `paas/v4` and `200` on
+`coding/paas/v4` — a difference in entitlement, not in capability), and an
+unattended multi-hour run is exactly where a rate cap turns into a wall of
+zero-reward episodes that look like agent failures.
+
+So the runner records `provider_error` as a **non-terminal** status. The task
+stays unattempted, and the supervisor may retry it. If provider errors are all
+it is getting, it **stalls and reports** rather than filling the manifest with
+zeros.
+
+Terminal statuses are `passed`, `failed`, `capped` and `errored` (task-side —
+the agent ran and something in the episode broke). A `capped` episode is scored
+by agisdk like any other, which will normally be `0`, but it is **counted
+separately and published beside the rate**: "of the n tasks, k ended on a cap"
+is a different statement from "the agent failed k tasks", and collapsing them
+overstates what was measured.
+
+### Attempts append; the score reads the first terminal attempt
+
+`runs/<run-id>/results.tsv` is append-only and holds one row per **attempt**,
+including retried ones. The success rate is computed from each task's **first
+terminal attempt**. Retries exist to survive provider errors and interruptions,
+never to re-roll a task until it passes — a loop that retries until success and
+scores the last attempt measures how many retries it was given, not how capable
+the agent is.
+
+### The supervisor stops on a condition, not on a judgement
+
+`scripts/supervise.py` re-invokes the runner until one of three machine-checkable
+outcomes, and never runs unbounded:
+
+| Exit | Condition |
+|---|---|
+| `0` | every manifest task has a terminal record |
+| `1` | K consecutive rounds added no new terminal record — **stalled** |
+| `2` | the token or wall-clock budget for the run was exceeded |
+
+It is idempotent: run it again after a completed run and it prints the summary
+and changes nothing. Each round appends a line with what it attempted, what
+became terminal, and any backoff it applied.
+
+### What is deliberately *not* looped
+
+**No autonomous coding loop in this repo.** The remaining features are
+measurement-integrity decisions — the denominator, the retry rule, what a cap
+means — and none of them has a machine-checkable stopping condition. The
+evaluator here is agisdk's own programmatic checks, which is stronger than a
+model judging a model; keeping it that way means the loop supervises **runs**,
+not **work**. The archived predecessor's rule stands: a model labelling its own
+failures makes the number meaningless.

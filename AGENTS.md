@@ -26,6 +26,21 @@ the score is comparable to a published baseline.
 - **No `Co-Authored-By` trailer**, ever.
 - Stay in scope. Do not touch files unrelated to your feature.
 
+## Feature list rules
+
+`feature_list.json` is the only source of scope. Each feature carries `id`,
+`name`, `description`, `dependencies`, `verification`, `status`, `evidence`.
+There is no `docs/TASKS.md` here — a feature's detail is its `description`, and
+its acceptance check is its `verification`.
+
+- **`verification` is the command that decides done**, written before the work
+  starts. If it cannot be run, it is not a verification.
+- `status` moves to `done` only after that command has actually run and its
+  **output** is in `evidence`.
+- **One feature `in-progress` at a time.** `./init.sh` fails on two.
+- `./init.sh` also fails on a `done` feature with an empty evidence field, and
+  on any feature missing its verification command.
+
 ## What this project measures
 
 Two things, and nothing beyond them:
@@ -49,6 +64,13 @@ These cost real time once. Do not rediscover them.
    less. Only a wall-clock race bounds an action.
 2. **A long run must checkpoint and resume.** An eight-hour run once produced
    nothing because it could not be resumed after a failure.
+
+The run loop that follows from this is specified in **`docs/DECISIONS.md` entry
+7** — frozen manifest, provider errors that are not task failures, attempts that
+append, and a supervisor that stops on a condition rather than a judgement.
+Those rules were decided before `feat-004` existed, because none of them can be
+applied honestly after seeing the results. Implement them; do not re-litigate
+them mid-run.
 
 ## Definition of Done
 

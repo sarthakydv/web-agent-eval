@@ -1,0 +1,67 @@
+name: checks
+
+# The offline half of ./init.sh, run on every push and PR. Everything here
+# passes without a key, a browser or a network round trip to the replica sites —
+# the parts of init.sh that need ZAI_API_KEY (the gate run, the capture scripts)
+# are deliberately not run here, because a CI job that needs a secret to be
+# honest is a CI job that gets skipped.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No secret may ever be tracked by git
+        run: |
+          if git ls-files | grep -qE '(^|/)\.env$'; then
+            echo "FAIL: .env is tracked by git"; exit 1
+          fi
+          echo "ok: no tracked .env"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # 3.12 is pinned in pyproject (>=3.12,<3.13) because agisdk pulls numpy,
+      # gymnasium and lxml, which lag new interpreters. uv resolves it from there.
+      - name: uv sync
+        run: uv sync --frozen
+
+      - name: Interpreter pin and agisdk import
+        run: uv run pytest tests/test_environment.py -q -k "not api_key"
+        # The api_key test asserts a local .env exists — a workstation
+        # invariant, not a CI one. Its other half, "never committed", runs above
+        # as its own step so CI does not lose that check.
+
+      - name: ruff
+        run: uv run ruff check .
+
+      - name: Feature tracker rules
+        run: |
+          python3 - feature_list.json <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "feature_list.json"))
+          feats = data["features"]
+          problems = []
+          no_ev = [f["id"] for f in feats if f["status"] == "done" and not (f.get("evidence") or "").strip()]
+          if no_ev:
+              problems.append("done with an empty evidence field: " + ", ".join(no_ev))
+          if data.get("verification_required"):
+              no_v = [f["id"] for f in feats if not (f.get("verification") or "").strip()]
+              if no_v:
+                  problems.append("no verification field: " + ", ".join(no_v))
+          wip = [f["id"] for f in feats if f["status"] == "in-progress"]
+          if len(wip) > 1:
+              problems.append("one feature at a time, but in-progress: " + ", ".join(wip))
+          for p in problems:
+              print("FAIL:", p)
+          sys.exit(1 if problems else 0)
+          PY
+
+      - name: Tests, with no key in the environment
+        run: env -u ZAI_API_KEY uv run pytest -q -k "not api_key"
