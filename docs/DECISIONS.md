@@ -24,6 +24,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **15** (2026-07-31) — `feat-006` projected from a pilot that ran, with the arithmetic shown
 - **16** (2026-07-31) — `feat-006`: the headline number is **17.6% over n = 102**
 - **17** (2026-07-31) — `feat-007`: the ablation is inside the noise, and the step cap was not what was binding
+- **18** (2026-07-31) — `feat-008`: the README leads with the score, and every figure in it was traced
 
 <!-- INDEX:END -->
 
@@ -1985,3 +1986,129 @@ Doubling the step cap cost 1.82x the tokens and bought one task.
   from an accidental measurement into a designed one; and whether `rich` above a
   12 000-token observation budget behaves differently from `rich` clipped to it.
   Neither is in `feat-007`'s scope and neither is claimed here.
+
+---
+
+## 18 — `feat-008`: the README leads with the score, and every figure in it was traced
+
+**Date:** 2026-07-31
+**Status:** documentation, plus the audit that makes it checkable
+**Reproduce:**
+`grep -rnE '\[(TBD|TODO|PLACEHOLDER|X+|N)\]' README.md docs/ src/ scripts/` (and
+its two controls, below), the trace command in README's *Viewing a stored trace*,
+`uv run python scripts/render_observation.py`, `./init.sh`
+
+### What the README leads with, and why that was a decision
+
+**The first line is the score, and it says the agent is below the baseline:**
+18 of 102, 17.6%, against REAL's published ≤41% ceiling. Not the methodology, not
+the engineering, and with nothing between the reader and the number.
+
+An agent under a published ceiling is an ordinary result and reads as one. What
+is not ordinary is a number whose limits have been measured, so the README spends
+its length on the three things that make 17.6% defensible rather than on softening
+it: the step cap was tested and did not explain it (3 of 56 convert at double the
+cap, and two of those three finished inside the *original* cap), the run-to-run
+noise floor is 17.9%, and the richness ablation is null at 5.18x the tokens. A
+reader who would have asked "isn't that just the cap?" gets the answer before
+they ask it.
+
+The denominator is stated at every appearance of a rate — `n = 102`, with the ten
+omnizon tasks and their HTTP 451 beside it — and both halves are given (8/55 =
+14.5% judged, 10/47 = 21.3% jmespath) because entry 16 showed the subsets are not
+interchangeable.
+
+### Every figure resolves to an entry, and here is the map
+
+| README section | figures | entry |
+|---|---|---|
+| headline, split, outcome counts | 18/102, 17.6%, 8/55, 10/47, 26/56/2 | 16 |
+| the excluded ten | 112 → 102, HTTP 451 `DMCA_TAKEDOWN` | 5, 16 |
+| the ≤41% baseline and its sources | ≤41% | 1 |
+| finding 1, the cap | 3 / 40 / 13 / 0, 5.4%, 23–33–23 steps, 20.6% composite | 17 |
+| finding 2, the noise floor | 10 of 56 = 17.9% | 17 |
+| finding 3, the ablation | 23/102, +4.9 pts, p = 0.302, x5.18, 72.6%, ±14.5/−6.4 | 17 |
+| cost, agent column | 4,000,919 tokens, mean 39,225, min 0, max 99,960 | 16 |
+| cost, judge column | $0.007926, 23 calls, $2.00/$8.00 per 1M, rate date | 16 |
+| cost, other two runs | 20,719,779, $0.011138, 5,657,354, x1.82, $0.001740 | 17 |
+| provenance | `glm-4.6` served, `gpt-4.1-2025-04-14` served | 16, 9, 10 |
+| why not n=47 | 21.3%, 3.7 points | 10, 16 |
+| caps | 25 steps / 400,000 tokens / 300 s; 16,000 and 12 s per step | 11, 17 |
+| run budgets | 8,000,000 tokens, 10,800 s | 15, 16 |
+| runtime expectation | ~4M tokens, ~76 min at concurrency 3 | 16 |
+| Python pin | 3.12 | 2 |
+| predecessor, licensing, replicas | eight hours, nine minutes, MIT vs non-commercial | 1 |
+
+Three figures were **removed** during the audit rather than cited: a test count, a
+DECISIONS entry count and a feature count. All three are true and all three are
+printed by `./init.sh`, but none traces to a numbered entry, and the rule is the
+rule. The README carries no number that a reader cannot follow to a measurement.
+
+### The placeholder check, with both controls
+
+The clean result is the uninteresting half. Per AGENTS.md, an empty search is
+worth nothing until the pipeline has been seen to find something — entry 8's
+`grep`-is-ugrep-and-honours-`.gitignore` trap is exactly this failure:
+
+```
+=== the check ===
+exit=1  (1 = no match = clean)
+
+=== the control: break it on purpose ===
+README.md:280:rate: «T-B-D in square brackets»
+exit=0  (0 = found it)
+
+=== restored ===
+exit=1
+
+=== control 2: the search is not blind to other trees ===
+src/web_agent_eval/_control.py:1:x «T-O-D-O in square brackets» y
+exit=0
+```
+
+The two matched tokens are written out in words rather than reproduced literally,
+and that is not tidying: `docs/` is inside the check's own search path, so pasting
+them verbatim would make this entry fail the verification it is recording. Every
+other character is the real output.
+
+Two controls, not one: the first proves the pattern matches, the second proves the
+search reaches `src/` and not only the file it was handed. Both planted files were
+removed and the check re-run clean afterwards.
+
+### Viewing a trace: no viewer, and the honest caveat
+
+`feat-008` explicitly forbids a viewer feature, and none was written. An episode
+is already one JSON file — `runs/<run-id>/episodes/<task>.attempt<n>.json`,
+holding the caps, the token accounting, the outcome and one record per step
+(action, URL, reward, usage, observation size, the model's raw reply) — so the
+documented way to read one is a six-line `python -c` over that file, printed in
+the README with its real output:
+
+```
+v1.gomail-2 lean completed 18 steps 45310 tokens
+  1  https://evals-gomail.vercel.app/          noop()
+...
+ 18  https://evals-gomail.vercel.app/          send_msg_to_user('First email marked as read.')
+```
+
+**`runs/` is gitignored**, so that path exists after a run and not on a fresh
+clone, and the README says so rather than shipping an instruction that silently
+fails for everyone but its author. The offline path that *does* work on a clone is
+the committed `fixtures/observations/` with `scripts/render_observation.py`, which
+needs no browser, no network and no API key. Both were run as written before being
+documented.
+
+### The limits section is the point, not an apology
+
+It states, in these words, that **"unseen real sites" is not claimed**; that
+REAL's replicas have no ads, cookie banners, modals, lazy loading or A/B tests and
+are therefore **easier** than live sites, so this score is **not comparable to a
+live-web score**; that ≤41% is a **published ceiling and not a like-for-like run**,
+naming its source and the four things that differ (task set, model, scaffold,
+caps); that every result carries its caps; and that this is **one run, one model,
+one date** under a measured 17.9% flip rate, so single-run per-task verdicts are
+noisy by construction and the aggregate is what is claimed.
+
+That last item is the reason the still-open work from entry 17 — the designed
+same-manifest-twice variance run — is named in the README as open rather than
+quietly dropped now that the project has run out of features.

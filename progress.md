@@ -3,7 +3,8 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001` … `feat-007` are done, one feature remains
+**Active Feature:** none — **`feat-001` … `feat-008` are all done. The project is
+complete.**
 **Status:** the `[GATE]` is through (one REAL task scored **1.0**), the
 observation serializer exists with richness as a parameter and a measured token
 budget, the **episode loop is built and bounded**, the **batch runner and
@@ -17,8 +18,12 @@ from the stored records alone. **The reachable population is 102, not 47.**
 is **+4.9 points at p = 0.302 and 5.18x the tokens**, and doubling the step cap
 converted **3 of the 56** capped tasks, so the cap was **not** what was binding.
 Along the way it measured a **17.9% run-to-run flip rate at `temperature=0`**,
-which bounds every small delta in this repo. The repo is **public** at
-`github.com/sarthakydv/web-agent-eval` with CI green.
+which bounds every small delta in this repo. `feat-008` wrote the **README**: it
+leads with the score and with the fact that it is under the baseline, states
+`n = 102` beside every rate, and every figure in it was traced to a numbered
+DECISIONS entry — three that could not be were removed rather than cited loosely
+(entry 18). The repo is **public** at `github.com/sarthakydv/web-agent-eval` with
+CI green.
 
 ## Status
 
@@ -139,21 +144,25 @@ which bounds every small delta in this repo. The repo is **public** at
 
 ### What's In Progress
 
-- Nothing. Stopped after `feat-005` as instructed, before `feat-006`.
+- Nothing. `feat-008` was the last feature and it is done.
 
 ### What's Next
 
-1. **`feat-006` is the long unattended run, and a human decides when it starts.**
-   Everything it needs is measured: population `102`, roughly **49 minutes** of
-   wall clock at concurrency 3 and **~3.5M agent tokens**, with a judge bill of
-   about **two cents** — entry 15 shows the arithmetic.
-2. The command is `uv run python scripts/supervise.py --run-id <id>
-   --population 102 --budget-tokens 8000000 --budget-wall-clock-s 10800`. It
-   resumes on its own after any interruption and is a no-op once complete.
-3. Score it with `uv run python scripts/score.py --run-id <id>`, then
-   `--check` to confirm the published figure comes back out of the records.
-4. `feat-006` must publish `n = 102` with the 10 omnizon exclusions and their
-   reason beside the rate, and state it against REAL's published ≤41% baseline.
+**Nothing in scope.** All eight features are `done` with real verification output
+in their evidence fields, and the README is the last deliverable. What follows is
+recorded as open work, not as planned work, and none of it is claimed anywhere:
+
+1. **The designed variance run** — the same manifest twice at the same caps —
+   which would turn entry 17's 17.9% flip rate from an accidental measurement
+   into a stated one. It is the most valuable thing left, because it bounds every
+   other comparison in the repo.
+2. **`rich` above a 12 000-token observation budget.** 72.6% of `rich` steps hit
+   the clip, so the ablation compared `lean` against a truncation.
+3. **Omnizon**, if the DMCA takedown is ever lifted: 10 tasks and a denominator
+   of 112 rather than 102.
+
+Any of these is a new measurement with its own DECISIONS entry, not an edit to an
+existing number.
 
 ## Blockers / Risks
 
@@ -322,6 +331,14 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
 - [x] `feat-006` projection from that pilot: `102 x 34,447.3 = 3,513,625` agent
       tokens, `102 x 28.70s = 2,928s = 48.8 min` at concurrency 3, judge ceiling
       `$0.0191` over 59 `llm_boolean` evals — entry 15.
+- [x] `feat-008` verification: the placeholder search over `README.md docs/ src/
+      scripts/` **exits 1 (clean)**, and it was proved non-vacuous both ways — a
+      planted placeholder in `README.md` and a planted file under
+      `src/web_agent_eval/` each made it exit 0 naming the file and line, and it
+      returned to clean after both were removed. Every README figure maps to a
+      numbered entry (table in entry 18); three untraceable counts were deleted.
+      The documented trace command and `scripts/render_observation.py` were both
+      run as written.
 - [x] Tests pass: `uv run pytest -q` → `146 passed in 114.80s`
 - [x] Lint clean: `uv run ruff check .` → `All checks passed!`
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
@@ -519,3 +536,51 @@ two manifests that the runs differ in one thing; seven refusals, each tested
 alongside the case where it must not fire (`tests/test_ablation.py`, 24 tests).
 `scripts/cap_budget.py` takes `--max-steps` and prints the per-step allowance.
 `scripts/preflight.py` handles an explicit task subset and checks the level.
+
+## `feat-008` — the README, written 2026-07-31
+
+The last feature, and it produced no new measurement: its whole job was to state
+the ones that exist without softening any of them. Entry 18.
+
+### What it leads with
+
+The first line of the README is **18 of 102 = 17.6% against REAL's published
+≤41% ceiling, and it says the agent is below the baseline.** No methodology
+ahead of it, nothing padding it. `n = 102` with the ten omnizon tasks and their
+HTTP 451 appears beside every rate, and both halves are given — **8/55 = 14.5%**
+judged, **10/47 = 21.3%** `jmespath` — because entry 16 showed the subsets are
+not interchangeable.
+
+Then the three findings that make the number defensible, in the order a sceptical
+reader would raise them: the **step cap was tested** and 3 of 56 convert at double
+it (two of those three inside the *original* cap), the **noise floor is 17.9%**,
+and the **richness ablation is null** — 5.18x the tokens for +4.9 points at
+p = 0.302, which is exactly what an 18% flip rate produces by chance.
+
+Cost is two columns that are never summed: agent **tokens only** (z.ai publishes
+no rate for this key and this project does not estimate one) and judge **dollars**
+(OpenAI publishes one; it is quoted with its date). Provenance is stated once and
+plainly: agent `glm-4.6`, scorer `gpt-4.1`, REAL's own judge.
+
+### The audit is the deliverable, not the prose
+
+Every figure in the README was walked back to a numbered entry, and the mapping is
+tabulated in entry 18. **Three figures were removed rather than cited loosely** —
+a test count, a DECISIONS entry count and a feature count. All three are true and
+`./init.sh` prints all three, but none traces to an entry.
+
+The placeholder check was run **with two controls**, per AGENTS.md: one planting a
+placeholder in `README.md` to prove the pattern matches, one planting a file under
+`src/` to prove the search reaches trees it was not handed directly. Both fired,
+both files were removed, the check re-ran clean. Entry 8's ugrep trap is precisely
+the failure this guards against.
+
+### Viewing a trace, and the caveat that ships with it
+
+No viewer was written — the feature forbids one and an episode is already one JSON
+file per attempt. The README documents a six-line `python -c` over
+`runs/<id>/episodes/<task>.attempt<n>.json` and prints its real output, and it says
+plainly that **`runs/` is gitignored**, so that path exists after a run and not on
+a fresh clone. The offline path that does work on a clone —
+`scripts/render_observation.py` over the committed `fixtures/observations/` — is
+documented beside it. Both were run as written before being documented.

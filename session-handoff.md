@@ -4,8 +4,9 @@
 
 - **Goal:** Measure a web agent on REAL (112 tasks, 11 deterministic replica
   sites) with every number traceable to something that actually ran.
-- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` … `feat-007`
-  **done**. **The headline measurement exists: 18 of 102 = 17.6%**, against
+- **Current status: the project is complete.** `feat-001` `[GATE]` **passed**,
+  `feat-002` … `feat-008` **done**, `feat-008` being the last feature in the
+  list. **The headline measurement exists: 18 of 102 = 17.6%**, against
   REAL's published **≤41%** baseline, run 2026-07-31 on `glm-4.6` at concurrency
   3 and scored by REAL's own `gpt-4.1` judge. Entry 16.
 - **`feat-007` answered both questions entry 16 left open** (entry 17).
@@ -24,8 +25,18 @@
 - **The reachable population is 102, not 47 and not 112.** 55 tasks judged by
   `gpt-4.1`, 47 by `jmespath` checks; the 10 omnizon tasks are out at HTTP 451,
   and that count and reason travel with the rate.
-- **Next is `feat-008`**, the README with honest limitations. Every number it
-  needs is now measured; nothing is outstanding for it to wait on.
+- **`feat-008` wrote the README** (entry 18). It leads with the score **and with
+  the fact that it is under the baseline**, repeats `n = 102` with the ten
+  omnizon exclusions beside every rate, gives both halves, and spends its length
+  on the three findings that make 17.6% defensible rather than on softening it.
+  Every figure in it was traced to a numbered entry and **three untraceable
+  counts were deleted rather than cited loosely**. The placeholder check ran with
+  two controls, both of which fired.
+- **Nothing is next.** The feature list is exhausted. What remains open is
+  recorded in `progress.md` under *What's Next* as open work, not planned work:
+  the designed same-manifest-twice variance run, `rich` above a 12 000-token
+  observation budget, and omnizon if the takedown lifts. Each is a new
+  measurement with its own entry, not an edit to an existing number.
 - **Branch / commit:** `main`, tracking `origin/main` at
   `github.com/sarthakydv/web-agent-eval` (**public**). CI green.
 
@@ -325,10 +336,12 @@ Entries 13, 14 and 15 were appended this session; 1–12 predate it.
 
 ## Next Session Startup
 
-1. Read `AGENTS.md`, then **only your feature's entry** in `feature_list.json`,
-   then the index at the top of `docs/DECISIONS.md` — for `feat-008`, entries 16
-   and 17 hold every number the README must state, and 1 holds the claim the
-   project does not make. Neither file is read end to end.
+1. Read `AGENTS.md`, then the index at the top of `docs/DECISIONS.md`. **There
+   is no next feature** — the list is exhausted — so start from `README.md`,
+   which states every published number with the entry it comes from. Entries 16
+   and 17 hold the measurements, 18 holds the audit that put them in the README,
+   and 1 holds the claim this project does not make. Neither `feature_list.json`
+   nor `docs/DECISIONS.md` is read end to end.
 2. Run `./init.sh` — expect `181 passed` and all checks passed. It takes ~2½
    minutes: `feat-004`'s and `feat-006`'s tests spawn real worker processes.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
@@ -345,8 +358,8 @@ somewhere materially different on a re-run at `temperature=0`.**
 
 ## Recommended Next Step
 
-`feat-008` — the README with honest limitations. Everything it has to state has
-now been measured, and the three qualifiers that must survive editing are:
+**None. All eight features are done and the README is written.** If this repo is
+picked up again, the three qualifiers that must survive any edit to it are:
 
 - **17.6% is at a 25-step cap**, and the cap was tested rather than assumed:
   3 of 56 capped tasks convert at 50 steps, 40 still stall. Entry 17.
@@ -354,12 +367,17 @@ now been measured, and the three qualifiers that must survive editing are:
   a live-web score, and that travels with every number.
 - **A five-task delta is noise here.** The measured run-to-run flip rate is
   17.9%, so the richness ablation's +4.9 points is "no effect detected", not a
-  small win — and the README must not upgrade it while summarising.
+  small win — and no summary may upgrade it.
+
+Two further rules the README now depends on: **every figure in it resolves to a
+numbered DECISIONS entry** (the map is in entry 18 — a new number means a new
+entry first), and **`n = 102` with the ten omnizon exclusions is stated beside
+every rate**, never a bare percentage.
 
 The one thing `feat-007` deliberately left undone: a **designed** variance run —
 the same manifest twice at the same caps — which would turn that 17.9% from an
 accidental measurement into a stated one. It is a new measurement, not an edit
-to an existing one.
+to an existing one, and the README names it as open rather than dropping it.
 
 How to start any new run — the preflight is not optional:
 
