@@ -249,6 +249,18 @@ class RoundResult:
     concurrency_end: int = 0
     tokens_after: int = 0
     elapsed_s: float = 0.0
+    #: What entry 7's "no two concurrent episodes on the same site" rule cost.
+    #: The pilot's ten tasks — one per site — never reached it, so until this
+    #: run the rule had never been exercised and its price was unmeasured.
+    #: `reorders` counts the launches that had to pass over a queued task whose
+    #: site was busy; `blocked_events` counts the moments a free worker slot
+    #: could not be filled at all; `idle_slot_s` is what that cost, in
+    #: worker-seconds a slot sat empty with work still queued.
+    site_reorders: int = 0
+    site_tasks_passed_over: int = 0
+    site_blocked_events: int = 0
+    site_idle_slot_s: float = 0.0
+    slot_s_available: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -265,6 +277,17 @@ class RoundResult:
             "concurrency_end": self.concurrency_end,
             "tokens_after": self.tokens_after,
             "elapsed_s": round(self.elapsed_s, 2),
+            "site_constraint": {
+                "reorders": self.site_reorders,
+                "tasks_passed_over": self.site_tasks_passed_over,
+                "blocked_events": self.site_blocked_events,
+                "idle_slot_s": round(self.site_idle_slot_s, 2),
+                "slot_s_available": round(self.slot_s_available, 2),
+                "idle_fraction": (
+                    round(self.site_idle_slot_s / self.slot_s_available, 5)
+                    if self.slot_s_available else None
+                ),
+            },
         }
 
 
@@ -431,8 +454,20 @@ def run_round(
             flight.proc.join(5)
             in_flight.remove(flight)
 
+    # What the site rule costs, accounted in worker-seconds rather than
+    # asserted. `blocked_slots` is how many slots the rule is holding empty as
+    # of the last pass; each pass adds that many slot-seconds to the bill.
+    last_tick = time.monotonic()
+    blocked_slots = 0
     try:
         while queued or in_flight:
+            now = time.monotonic()
+            elapsed_tick = now - last_tick
+            last_tick = now
+            result.slot_s_available += effective * elapsed_tick
+            if blocked_slots:
+                result.site_idle_slot_s += blocked_slots * elapsed_tick
+
             stop = budget.exceeded(
                 tokens=tokens_spent(), elapsed_s=time.monotonic() - run_started
             )
@@ -442,13 +477,34 @@ def run_round(
                 abort_all("stopped on the run budget")
                 break
 
+            passed_over = 0
             while queued and len(in_flight) < effective:
                 busy = busy_sites()
-                nxt = next((t for t in queued if site_of(t) not in busy), None)
+                # The first queued task whose site is free. Its index is how
+                # many tasks the rule made this launch step over: the manifest
+                # is ordered by site, so with 3 workers on 10 sites this is
+                # reached on nearly every launch rather than only at the tail.
+                nxt = None
+                for index, task_id in enumerate(queued):
+                    if site_of(task_id) not in busy:
+                        nxt = task_id
+                        passed_over += index
+                        break
                 if nxt is None:
                     break  # everything left is on a site already in flight
                 queued.remove(nxt)
                 launch(nxt)
+            if passed_over:
+                result.site_reorders += 1
+                result.site_tasks_passed_over += passed_over
+
+            was_blocked = blocked_slots > 0
+            blocked_slots = max(0, effective - len(in_flight)) if queued else 0
+            if blocked_slots and not was_blocked:
+                result.site_blocked_events += 1
+                log(f"  site rule: {blocked_slots} slot(s) idle — every one of the "
+                    f"{len(queued)} queued tasks is on a site already in flight "
+                    f"({sorted(busy_sites())})")
 
             try:
                 payload = result_queue.get(timeout=0.5)

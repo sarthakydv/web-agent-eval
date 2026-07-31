@@ -163,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
             "statuses": round_data.get("statuses", {}),
             "retired_processes": len(round_data.get("retired_processes", [])),
             "budget_stop": round_data.get("budget_stop"),
+            # Entry 7's site rule had never been exercised before this feature —
+            # the pilot ran one task per site. What it costs in scheduling is
+            # recorded per round rather than assumed to be free.
+            "site_constraint": round_data.get("site_constraint", {}),
             "next_concurrency": concurrency,
             "backoff_s": backoff,
             "stalled_rounds": stalled_rounds,
@@ -174,6 +178,14 @@ def main(argv: list[str] | None = None) -> int:
               f", new terminal {new_terminal}, pending {len(pending)}, "
               f"provider errors {provider_errors}, "
               f"retired {entry['retired_processes']}, backoff {backoff:g}s")
+        site = entry["site_constraint"]
+        if site:
+            print(f"  site rule: {site.get('reorders', 0)} launches reordered "
+                  f"({site.get('tasks_passed_over', 0)} task-positions passed over), "
+                  f"{site.get('blocked_events', 0)} idle-slot events costing "
+                  f"{site.get('idle_slot_s', 0):.1f} worker-seconds of "
+                  f"{site.get('slot_s_available', 0):.1f} available "
+                  f"({(site.get('idle_fraction') or 0):.2%})")
 
         if completed.returncode == EXIT_BUDGET or round_data.get("budget_stop"):
             exit_code = EXIT_BUDGET

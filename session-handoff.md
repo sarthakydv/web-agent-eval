@@ -4,25 +4,55 @@
 
 - **Goal:** Measure a web agent on REAL (112 tasks, 11 deterministic replica
   sites) with every number traceable to something that actually ran.
-- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` … `feat-005`
-  **done**. One REAL task ran end to end on GLM and scored **1.0**; the
-  serializer renders an observation at a parameterised richness level under a
-  measured token budget; the episode loop runs under three independent caps; the
-  batch runner and supervisor drive it unattended, resuming after a `SIGKILL`,
-  refusing to call a `429` a task failure, and stopping on a budget; and
-  **scoring and cost recording are done** — REAL's own `gpt-4.1` judge has been
-  seen to run against OpenAI and return a grade, and a 10-task pilot's aggregate
-  reproduces from the stored records alone.
-- **The reachable population is 102, not 47.** The judge works, so all 102
-  reachable tasks are scorable: 55 by `gpt-4.1`, 47 by `jmespath` checks. Only
-  the 10 omnizon tasks are out, and their count and reason travel with the rate.
-- **Next is `feat-006`, and it is deliberately not started.** It is the long
-  unattended run and a human should decide when it begins. It is now scheduled
-  against a measurement, not a hope — entry 15.
+- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` … `feat-006`
+  **done**. **The headline measurement exists: 18 of 102 = 17.6%**, against
+  REAL's published **≤41%** baseline, run 2026-07-31 on `glm-4.6` at concurrency
+  3 and scored by REAL's own `gpt-4.1` judge. Entry 16.
+- **Deterministic replicas are easier than live sites, so 17.6% is not
+  comparable to a live-web score.** That qualifier goes with the number wherever
+  it appears — README, DECISIONS, the evidence field.
+- **The reachable population is 102, not 47 and not 112.** 55 tasks judged by
+  `gpt-4.1`, 47 by `jmespath` checks; the 10 omnizon tasks are out at HTTP 451,
+  and that count and reason travel with the rate.
+- **Next is `feat-007`**, and entry 16 is what it will be measured against:
+  **56 of 102 episodes ran out of steps** at the `lean` observation level.
 - **Branch / commit:** `main`, tracking `origin/main` at
   `github.com/sarthakydv/web-agent-eval` (**public**). CI green.
 
-## Completed This Session (`feat-005` — evaluation and cost recording)
+## Completed This Session (`feat-006` — the full 102-task run)
+
+- [x] **The run.** `runs/full102/`, 2026-07-31 06:58 → 08:14 UTC, 102 tasks,
+      concurrency 3, supervisor **exit 0** — every manifest task has a terminal
+      record. `passed 18 / failed 26 / capped 56 / errored 2`, 10 excluded.
+      **17.6% over n = 102.** Neither budget was approached: 4.00 M of 8 M
+      tokens, 76 min of 180.
+- [x] **`src/web_agent_eval/sites.py`** — reachability for every replica host,
+      three probes each, URLs read from the installed task configs rather than
+      copied. A 451, a 5xx, a DNS failure and a timeout are all "not reachable";
+      a 308 landing on 200 is reachable, which is what gocalendar does.
+- [x] **`scripts/preflight.py`** — the only thing that writes a manifest for a
+      real run. Asserts the judge **and its control**, makes one live judge call,
+      probes reachability and **freezes it into the manifest**, records the
+      *served* model beside the requested one, then re-reads the manifest from
+      disk and checks population, n, exclusion count and reason, sites,
+      concurrency, served model and date. Refuses to write anything if a check
+      fails, and refuses to overwrite an existing manifest.
+- [x] **`scripts/run_batch.py` refuses a real run whose manifest has no
+      reachability record**, so the preflight is structural, not remembered.
+- [x] **Entry 7's site rule is now instrumented** — `RoundResult.site_*` counts
+      reordered launches, task-positions passed over, idle-slot stretches and the
+      worker-seconds they cost, printed per round by the supervisor.
+- [x] **`scoring.subset_rates` / `subsets`** — the `jmespath` and judge-scored
+      halves, rendered beside the headline. Derived from rows the payload already
+      had, so the digest is unchanged and `feat-005`'s pilot still `--check`s.
+- [x] **`tests/test_preflight.py`** — 11 tests, each with its control: a 451/5xx/
+      DNS failure must read as unreachable *and* a 200 and a 308→200 must not; the
+      new manifest fields must round-trip *and* a pre-`feat-006` manifest must
+      still load; the site rule must bill idle slots on same-site work *and* bill
+      nothing when the sites differ.
+- [x] **`docs/DECISIONS.md` entry 16**, `README.md` headline filled in.
+
+## Completed Earlier (`feat-005` — evaluation and cost recording)
 
 - [x] **`src/web_agent_eval/judge.py`** — the judge, asserted and instrumented.
       `require()` refuses to run if `OPENAI_API_KEY` is absent or if
@@ -226,64 +256,78 @@ Entries 13, 14 and 15 were appended this session; 1–12 predate it.
 
 ## Blockers / Risks
 
-- **`feat-006` is not started on purpose.** It is the long unattended run — about
-  **49 minutes** at concurrency 3 — and a human should decide when it begins. It
-  is not blocked; it is waiting.
-- **`feat-006`'s denominator is 102, never 112.** `evals-omnizon.vercel.app` is
-  DMCA-taken-down (451). The count and reason must be published beside any rate —
-  entry 5.
+- **The denominator is 102, never 112.** `evals-omnizon.vercel.app` is
+  DMCA-taken-down (451), re-confirmed before *and* after the run. The count and
+  reason must be published beside any rate — entries 5 and 16.
+- **The 429 is real and it will come back.** `429 / code 1302` at seventeen
+  minutes into the run, which entry 12's probes had said they could not rule out.
+  The design survived it and no task was mislabelled, but a longer run should
+  expect it: concurrency halves on each one and recovers one worker per five
+  clean episodes, so a burst costs wall clock rather than correctness.
+- **Never quote a rate re-run to improve it.** The 5 provider-error tasks were
+  retried because a `429` is not a task failure; every task still has exactly one
+  terminal attempt, and the rate is the first-terminal-attempt rate. Re-running
+  a *failed* task would break that, and nothing in the tooling stops a human
+  from doing it by hand.
 - **A misrouted judge would look exactly like a working one.** The assertion now
   runs before every batch and refuses on failure, but the risk lives in the
   environment. Never export `OPENAI_BASE_URL`, and never uncomment it in `.env`
   except for entry 10's optional GLM-as-judge comparison, which must opt in.
-- **The cap rate is the projection's dominant term and its weakest input.** 4 of
-  10 pilot episodes capped on 25 steps, and a capped episode costs an order of
-  magnitude more than a passing one. If `feat-006` caps at 60% the token total
-  moves toward 5M; at 20% toward 2.5M. Re-check after round 1.
-- **A quota beyond 315 calls / 7 minutes is not ruled out.** The design survives
-  it (non-terminal provider errors, stall exit, resume) but a long unattended run
-  should be checked on rather than assumed.
+- **The cap rate came in at 54.9%, not the pilot's 40%.** That was the
+  projection's dominant term and its weakest input, and it moved 15 points —
+  which is most of why the run took 76 minutes rather than 48.8.
 - **Whether 25 steps at the `lean` level is the right operating point** is
-  `feat-006`'s and `feat-007`'s question, not something to change quietly
-  mid-measurement — caps are held constant across arms (entry 11).
+  `feat-007`'s question, and it is now the interesting one: **more than half the
+  population never finished**. Caps are held constant across arms (entry 11), so
+  changing them is a new measurement, not an edit to this one.
 - **Replica sites are easier than live ones.** A score here is not comparable to
   a live-web score.
 
 ## Next Session Startup
 
-1. Read `AGENTS.md`, then **only `feat-006`'s entry** in `feature_list.json`,
-   then the index at the top of `docs/DECISIONS.md` — entry 7 for the run loop's
-   rules, 5 for the population, 12 for how a run is driven, 13–15 for the judge,
-   the two cost columns and the projection. Neither file is read end to end.
-2. Run `./init.sh` — expect `146 passed` and all checks passed. It takes ~2
-   minutes: `feat-004`'s tests spawn real worker processes.
+1. Read `AGENTS.md`, then **only your feature's entry** in `feature_list.json`,
+   then the index at the top of `docs/DECISIONS.md` — for `feat-007`, entry 16
+   is the baseline it moves against, 11 for the caps, 6 for the observation
+   levels and how tokens are counted. Neither file is read end to end.
+2. Run `./init.sh` — expect `157 passed` and all checks passed. It takes ~2½
+   minutes: `feat-004`'s and `feat-006`'s tests spawn real worker processes.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
 
 Nothing is outstanding. `main` is the only local branch and `main == origin/main`.
-`runs/` is gitignored, so `runs/pilot/` is local only — its numbers live in
-entry 15 and in `feat-005`'s evidence field.
+`runs/` is gitignored, so `runs/full102/` is **local only** — its numbers live in
+entry 16 and in `feat-006`'s evidence field. If that directory is lost, the run
+cannot be re-derived; it can only be re-run, and a re-run is a new measurement.
 
 ## Recommended Next Step
 
-`feat-006`, the full run, **when a human starts it**. Everything it needs is
-measured:
+`feat-007`, the observation-richness ablation, against entry 16's baseline. Its
+subject is now sharply defined by the run: **56 of 102 episodes exhausted 25
+steps at the `lean` level**, and a capped episode costs an order of magnitude
+more than a passing one, so richness is being paid for either way.
+
+How to start any new run — the preflight is not optional:
 
 ```
-uv run python scripts/supervise.py --run-id <id> --population 102 \
-    --concurrency 3 --budget-tokens 8000000 --budget-wall-clock-s 10800
+uv run python scripts/preflight.py  --run-id <id> --population 102 --concurrency 3
+uv run python scripts/supervise.py  --run-id <id> --population 102 --concurrency 3 \
+    --budget-tokens 8000000 --budget-wall-clock-s 10800
 uv run python scripts/score.py --run-id <id>
 uv run python scripts/score.py --run-id <id> --check
 ```
 
-- **Expect ~49 minutes and ~3.5M agent tokens**, with a judge bill near two
-  cents. Both budgets above sit above the pessimistic bound rather than the
-  central estimate, because exiting 2 on a budget is a stop, not a failure.
-- **The run asserts its judge before the first browser starts** and refuses if it
-  would go anywhere but OpenAI. That line is in the log; read it.
+- **Expect ~76 minutes and ~4M agent tokens** at concurrency 3 with a judge bill
+  under a cent — measured, not projected. Budget headroom is deliberate: exiting
+  2 on a budget is a stop, not a failure.
+- **`preflight.py` writes the manifest and nothing else does.** `run_batch.py`
+  refuses a real run whose manifest has no reachability record.
+- **Take a postflight probe too.** The before-probe alone cannot tell you a host
+  died mid-run; only the pair can.
 - **`score.py` reads records only**, so the published figure can be re-derived
   from `runs/<id>/` months later. Run `--check` before quoting anything.
+- **An arm's rate is only comparable to entry 16's if the caps and the population
+  match.** Change one thing.
 - **Publish `n = 102` with the 10 omnizon exclusions and their reason**, state it
   against REAL's published **≤41%** baseline, and count `capped` separately from
   `failed` — "k ended on a cap" is a different statement from "the agent failed

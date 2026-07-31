@@ -68,8 +68,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cannot start: {exc}", file=sys.stderr)
         return 1
 
-    if args.entrypoint == cli.DEFAULT_ENTRYPOINT and check_judge(manifest) != 0:
-        return 1
+    if args.entrypoint == cli.DEFAULT_ENTRYPOINT:
+        if not manifest.site_reachability:
+            # Entry 5's exclusions were measured on one afternoon and a host can
+            # vanish between then and now. Without a reachability record taken
+            # at a known moment, a host that disappeared mid-population is
+            # indistinguishable from an agent that could not do its tasks.
+            print(f"cannot start: {manifest.run_id}'s manifest carries no site "
+                  f"reachability record. Run scripts/preflight.py first — it probes "
+                  f"the hosts and freezes the result into the manifest (DECISIONS "
+                  f"entries 5 and 7).", file=sys.stderr)
+            return 1
+        if check_judge(manifest) != 0:
+            return 1
 
     # Workers live in this process group, so one signal reaches the browsers too.
     batch.install_kill_on_parent_death()

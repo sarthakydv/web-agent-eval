@@ -12,6 +12,8 @@ Measured, not inferred — see docs/DECISIONS.md entry 4.
 from __future__ import annotations
 
 import os
+import time
+from datetime import UTC, datetime
 
 from openai import OpenAI
 
@@ -24,6 +26,37 @@ DEFAULT_MODEL = "glm-4.6"
 def base_url() -> str:
     """The base URL to drive GLM through. Overridable, defaults to the coding plan."""
     return os.environ.get("ZAI_BASE_URL", CODING_PLAN_BASE_URL)
+
+
+def served_model(model: str = DEFAULT_MODEL) -> dict:
+    """What the endpoint actually serves when this project asks for `model`.
+
+    The requested string and the served string are not the same fact. Entry 9
+    refused `glm-5.1` because `glm-5.2` answered to it, with no way to pin the
+    one that was asked for; entry 13 kept `gpt-4.1-2025-04-14` in every judge
+    record for the same reason. A run's manifest records the requested model
+    because that is what was asked for, and this records what answered — so a
+    rerun served by something else is a changed value rather than a silent
+    change of subject.
+
+    One trivial completion. It is a real call, so it is also the last cheap
+    proof that the key works before an hours-long run starts on it.
+    """
+    client = make_client()
+    started = time.monotonic()
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": "ok"}],
+        max_tokens=1,
+        temperature=0.0,
+    )
+    return {
+        "requested": model,
+        "served": getattr(response, "model", None),
+        "base_url": base_url(),
+        "latency_s": round(time.monotonic() - started, 3),
+        "probed_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
 
 
 def make_client() -> OpenAI:

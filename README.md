@@ -3,16 +3,36 @@
 A web agent measured on [REAL](https://github.com/agi-inc/REAL) — 112 tasks
 across 11 deterministic replica sites.
 
-> **Status: scaffolded, nothing measured yet.** Every number below is `TBD` and
-> will stay `TBD` until something actually produces it. No figure appears in this
-> README that does not trace to an entry in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+> **Status: measured, 2026-07-31.** No figure appears in this README that does
+> not trace to an entry in [`docs/DECISIONS.md`](docs/DECISIONS.md). Anything not
+> yet produced by something that ran stays `TBD`.
 
 ## What this measures
 
 | | |
 |---|---|
-| Success rate over REAL's 112 tasks | `TBD` — against a published **≤41%** baseline |
-| Tokens per task | `TBD` |
+| Success rate, **n = 102** | **17.6%** (18/102) — against a published **≤41%** baseline |
+| Tokens per task | **39,225 mean** (4,000,919 agent tokens over 102 tasks) |
+
+**Deterministic replicas are easier than live sites, so 17.6% is not comparable
+to a live-web score.** That qualifier goes with the number wherever it appears.
+
+`n = 102`, not 112: the omnizon replica returns HTTP 451 (`DMCA_TAKEDOWN`), so
+its 10 tasks cannot run. The count and the reason are published beside the rate,
+never a denominator left unstated. Of the 102: **18 passed, 26 failed, 56 ran
+out of steps (`capped`, counted apart from failed), 2 errored task-side.**
+
+Broken out by how a task is scored, because they are different task shapes:
+**8/55 = 14.5%** on the judge-scored (`llm_boolean`) half, **10/47 = 21.3%** on
+the `jmespath`-scored half.
+
+Two cost columns, never added together: **4,000,919 agent tokens** with no dollar
+figure, because z.ai publishes no rate for this Coding Plan key; and **$0.0079**
+of judging, at OpenAI's published rate on measured usage.
+
+The agent is `glm-4.6` (served `glm-4.6`); the scorer is REAL's own `gpt-4.1`
+(served `gpt-4.1-2025-04-14`), at concurrency 3, in 76 minutes.
+See [`docs/DECISIONS.md`](docs/DECISIONS.md) entry 16.
 
 ## What this does **not** claim
 

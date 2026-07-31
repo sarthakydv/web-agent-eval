@@ -175,6 +175,14 @@ class Manifest:
     #: so any timing number read out of this run carries the level it ran at.
     note: str = ""
     sites: list[str] = field(default_factory=list)
+    #: Reachability of every replica host, measured immediately before this run
+    #: and frozen with everything else (`sites.probe_all`). A host that vanishes
+    #: is otherwise indistinguishable from an agent that suddenly cannot do its
+    #: tasks, and only a record taken at a known moment tells the two apart.
+    site_reachability: list[dict] = field(default_factory=list)
+    #: What the endpoint served when asked for `model`, measured the same way.
+    #: `model` is what was requested; entry 9 is why the two are kept apart.
+    served_model: dict = field(default_factory=dict)
 
     @property
     def size(self) -> int:
@@ -207,6 +215,8 @@ def build(
     episode_entrypoint: str,
     note: str = "",
     real_tasks: bool = True,
+    site_reachability: list[dict] | None = None,
+    served_model: dict | None = None,
 ) -> Manifest:
     task_ids, exclusions = population(population_name, explicit, real_tasks=real_tasks)
     # Entry 7: per-task wall clock at N>1 is not comparable to sequential, so
@@ -227,6 +237,8 @@ def build(
         episode_entrypoint=episode_entrypoint,
         note=note,
         sites=sorted({site_of(t) for t in task_ids}),
+        site_reachability=list(site_reachability or []),
+        served_model=dict(served_model or {}),
     )
 
 

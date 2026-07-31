@@ -22,6 +22,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **13** (2026-07-31) — `feat-005`: the judge really runs, and the reachable population is 102
 - **14** (2026-07-31) — Cost has two halves, and they are not the same kind of number
 - **15** (2026-07-31) — `feat-006` projected from a pilot that ran, with the arithmetic shown
+- **16** (2026-07-31) — `feat-006`: the headline number is **17.6% over n = 102**
 
 <!-- INDEX:END -->
 
@@ -1541,3 +1542,190 @@ above the pessimistic bound rather than the central estimate, because exiting 2
 on a budget is a stop, not a failure, and a budget tuned to the expected case
 would turn an unlucky cap rate into an interrupted run. The point of the numbers
 is that `feat-006` is now scheduled against a measurement.
+
+---
+
+## 16 — `feat-006`: the headline number is **17.6% over n = 102**
+
+**Date:** 2026-07-31
+**Status:** measured; this is the number this project exists to produce
+**Run:** `runs/full102/` — manifest, per-task records, `results.tsv`, round logs
+**Agent:** `glm-4.6` requested, **`glm-4.6` served**, z.ai Coding Plan endpoint
+**Scorer:** `gpt-4.1` requested, **`gpt-4.1-2025-04-14` served**, `api.openai.com`
+**Concurrency:** 3 configured; 3 → 1 → 3 during the run (see the rate limit below)
+**Reproduce:**
+`uv run python scripts/preflight.py --run-id <new-id> --population 102 --concurrency 3`,
+`uv run python scripts/supervise.py --run-id <new-id> --population 102 --concurrency 3
+--budget-tokens 8000000 --budget-wall-clock-s 10800`,
+`uv run python scripts/score.py --run-id full102 --check`
+
+### The number
+
+**18 of 102 tasks passed — 17.6% — against REAL's published ≤41% baseline.**
+
+**These are deterministic replicas, which are easier than live sites, so this is
+not comparable to a live-web score.** That qualifier travels with the number
+wherever it appears; it is entry 1's cost, paid in full.
+
+```
+population 102 (reachable)          n = 102        rate 17.65%
+  passed     18
+  failed     26
+  capped     56   counted and published apart from failed
+  errored     2   task-side: one page-load timeout, one crashed browser tab
+excluded    10   omnizon, HTTP 451 x-vercel-error: DMCA_TAKEDOWN (entry 5)
+                 112 v1 tasks - 10 = 102; the denominator is stated everywhere
+```
+
+`capped` is not folded into `failed`. **56 of 102 episodes ended on the 25-step
+cap** — more than half the population — and "the agent failed 82 tasks" would be
+a different and less true sentence than "18 passed, 26 failed, 56 ran out of
+steps, 2 broke". The cap is doing more work than the agent is.
+
+### Both subsets, because they are different task shapes
+
+Entry 10 rejected scoring only the 47 `jmespath` tasks on the grounds that the
+subset is not a random sample. Having run both, here is what that would have
+cost:
+
+```
+                       passed / terminal      rate
+  judge (llm_boolean)      8 / 55           14.5%     capped 29, failed 17, errored 1
+  jmespath only           10 / 47           21.3%     capped 27, failed  9, errored 1
+  ------------------------------------------------
+  all                     18 / 102          17.6%
+```
+
+The n=47 shortcut would have published **21.3%**, 3.7 points above the real
+figure and 6.8 points above the judged half. The subsets are not interchangeable
+and the decision to buy the judge was worth what it cost. A reader gets both.
+
+### Cost — two columns, still not summed
+
+```
+AGENT  glm-4.6 on z.ai Coding Plan
+       4,000,919 tokens over the 102 scored attempts
+       (mean 39,225; min 0 — an episode that died at step 0; max 99,960)
+       4,097,114 tokens over all 107 attempts, including the 5 that met a 429
+       USD: none. z.ai publishes no rate for this Coding Plan key (entry 6).
+
+JUDGE  gpt-4.1 on OpenAI: 23 calls, 3,687 prompt + 69 completion tokens
+       = $0.007926 at the published $2.00/$8.00 per 1M in/out
+       rate source: https://developers.openai.com/api/docs/pricing, 2026-07-31
+```
+
+**The whole judged half of the headline cost eight tenths of a cent.** Entry 15
+projected $0.0191 as a *ceiling* on the assumption every judged task's agent
+answers; 32 of the 55 never did, so only 23 evals reached the judge and the
+actual came in at 41% of the ceiling. The ceiling behaved as a ceiling.
+
+Those 32 are named in `score.json` (`judge.tasks_unjudged`) rather than absorbed:
+they are real zeroes, but agisdk's `evaluate()` never ran for them, so they were
+never *graded*. Entry 13 built that distinction and this run is where it paid.
+
+### Wall clock
+
+```
+end to end   06:58:06 -> 08:14:26 UTC = 76.3 min (2 rounds, 75.5 min of round time)
+per episode  mean 97.5 s, min 6.7 s, max 249.1 s, total 9,949 s
+```
+
+At concurrency 3, and **per-task wall clock at N=3 is not comparable to
+sequential** (entry 7). Entry 15 projected 48.8 min and it took 76.3 — 56% over,
+and both reasons are recorded below rather than absorbed into "roughly right".
+
+### The rate limit entry 12 said it could not rule out
+
+**At 07:15:42, seventeen minutes in, z.ai began returning `429 / code 1302`
+"Rate limit reached for requests".** Five attempts met it across two minutes.
+
+Entry 12 measured 12 simultaneous requests accepted and 315 consecutive calls
+over 7 minutes with zero rejections, and said in the same breath that this did
+**not** rule out a quota at hour two, and that the design answer was not a bigger
+probe. That was the right call, because this is exactly the case it named, and
+the design held:
+
+* Every one was classified `provider_error` and **no terminal record was
+  written for any of them** — the five tasks stayed pending.
+* Concurrency halved 3 → 1 on the first, and recovered one worker per five clean
+  episodes back to 3.
+* Round 2 re-attempted exactly those five and all five terminalised: 1 passed,
+  3 capped, 1 failed.
+* `results.tsv` holds 107 attempts for 102 tasks — the five extras are the five
+  429s. **Every task has exactly one terminal attempt**, so the rate is the
+  first-terminal-attempt rate with nothing re-rolled.
+
+Had those five been recorded as failures instead, the published rate would have
+been the same 18 passes over the same 102 tasks — but four of the five went on
+to cap or fail anyway, and **one went on to pass**. A single point of the
+headline rate was sitting on that rule.
+
+This is also most of the missing wall clock: roughly 17 minutes of the run were
+spent at concurrency 1 or 2 while recovering.
+
+### What entry 7's site rule actually cost, now that it has been exercised
+
+Entry 15 flagged that the pilot never reached this rule — ten tasks, one per
+site. Over 102 tasks on 10 sites it engaged constantly, and it is now measured
+rather than assumed free:
+
+```
+  52 launches had to step over a queued task whose site was busy
+ 362 task-positions passed over in total (the manifest is ordered by site)
+   2 stretches where a free worker slot could not be filled at all
+1,121 worker-seconds idle, of 11,618 available  =  9.7%
+```
+
+**The reordering is free and constant; the cost is all in the tail.** For most of
+the run there were ten sites and three workers, so a launchable task always
+existed. The bill was rung up at the end, when the queue narrowed to two sites
+(`udriver`, `zilloft`) with thirteen tasks left and one worker had nothing legal
+to run for the rest of the round. The fix, if it is ever worth making, is
+ordering the manifest to interleave sites rather than group them — not lifting
+the rule, which still protects the state diffs it was written for.
+
+### Against entry 15's projection
+
+| | projected | actual |
+|---|---|---|
+| agent tokens | 3.51 M central, 0.23–8.08 M bounds | **4.00 M** — inside, above central |
+| wall clock | 48.8 min at N=3 | **76.3 min** — 429 recovery and the site tail |
+| cap rate | 40% (4 of 10, flagged as least reliable) | **54.9%** (56 of 102) |
+| judge cost | $0.0191 ceiling | **$0.0079** |
+| budget | 8 M tokens, 10 800 s | neither approached; supervisor exited **0** |
+
+The pilot's own warning was right: the cap rate was the dominant term and the
+least well measured, and it moved 15 points. Everything else followed from it.
+
+### Reachability was re-probed before and after, and did not move
+
+Omnizon was 451 on all three probes at 06:58 and 451 again at 08:16; the other
+ten answered 200 both times (gocalendar 308 → 200). Both probes are stored —
+the before in `manifest.json`, frozen with the population it justifies, the
+after in `postflight.json`. A host that died mid-run would appear in exactly one
+of them. None did, so the two `errored` tasks are what they look like: a page
+that would not load and a tab that crashed, not a site that went away.
+
+### The judge was proved live before the first browser, with its control
+
+`scripts/preflight.py` refuses to write a manifest unless all of it passes:
+
+```
+  55 of 102 tasks carry an llm_boolean eval
+  model gpt-4.1  base_url https://api.openai.com/v1/ (host api.openai.com)  OPENAI_BASE_URL=None
+  control: refused, as it must — the judge would run against
+           'https://api.z.ai/api/coding/paas/v4/' (host 'api.z.ai'), not api.openai.com
+  live call: requested 'gpt-4.1' -> served 'gpt-4.1-2025-04-14', reply '1', usage 16 tokens
+```
+
+More than half the result depended on that, and a judge that was silently down
+would have turned 55 tasks into plausible zeroes with nothing downstream able to
+notice. `scripts/run_batch.py` now also refuses any real run whose manifest
+carries no reachability record, so the preflight is structural rather than
+remembered.
+
+### If this is disappointing, it is still the number
+
+17.6% against a ≤41% ceiling, with 55% of episodes running out of steps at
+`lean` observation richness. The step cap and the observation level are
+`feat-007`'s subject, and this entry is what it will be measured against.

@@ -376,3 +376,66 @@ different thread (which happens to have exited)` — zero steps, zero tokens.
 11 episodes are not: the tasks were chosen for site and eval-type coverage, `n`
 is 10, and the population is `explicit`. It is a *cost* measurement, and that is
 all `feat-006` should take from it.
+
+---
+
+## `feat-006` — the headline measurement, run 2026-07-31
+
+**18 of 102 = 17.6%, against REAL's published ≤41% baseline. Deterministic
+replicas are easier than live sites, so this is not comparable to a live-web
+score.** Full accounting in `docs/DECISIONS.md` entry 16; run in `runs/full102/`.
+
+`passed 18 / failed 26 / capped 56 / errored 2`, plus `10 excluded` (omnizon,
+HTTP 451). `capped` is published apart from `failed` on purpose: **more than
+half the population ran out of steps**, and calling that 82 failures would be a
+different and less true sentence.
+
+**Both subsets are published.** Judge-scored (`llm_boolean`, n=55): 8 passed,
+14.5%. `jmespath`-scored (n=47): 10 passed, 21.3%. The n=47 shortcut entry 10
+rejected would have published 21.3% — 3.7 points high — which is the empirical
+answer to "is the cheap subset a fair sample". It is not.
+
+**Cost, two columns, never summed.** Agent: 4 000 919 tokens over the 102 scored
+attempts (4 097 114 over all 107, including the five that met a `429`), no dollar
+figure because z.ai publishes no rate for this key. Judge: $0.007926 for 23
+calls — the whole judged half of the headline cost under a cent.
+
+### Three things this run learned that no earlier one could
+
+**The 429 arrived, at seventeen minutes.** `429 / code 1302`, five attempts.
+Entry 12's probes (12 concurrent accepted, 315 calls over 7 minutes clean) had
+said explicitly that they could not rule out a quota later in a run, and that the
+design answer was the non-terminal `provider_error`, not a bigger probe. It held:
+no terminal record was written for any of the five, concurrency halved 3 → 1 and
+recovered, round 2 re-ran exactly those five, and every task ended with **exactly
+one terminal attempt**. One of the five went on to *pass* — a point of the
+headline rate was resting on that rule.
+
+**Entry 7's site rule was exercised for the first time and cost 9.7%.** The pilot
+never reached it (one task per site). Over 102 tasks it reordered 52 launches
+past 362 task-positions, which is free, and idled 1 121 worker-seconds of 11 618
+— **all of it in the tail**, once the queue narrowed to two sites with thirteen
+tasks left. If it is ever worth recovering, the fix is interleaving the
+manifest's site order, not lifting the rule.
+
+**The projection was right about tokens and wrong about wall clock.** 4.00 M
+against a 3.51 M central estimate (inside the bounds); 76.3 min against 48.8.
+The gap is the 429 recovery plus the site tail. The pilot's own warning — that
+the cap rate was the dominant term and the least well measured — was correct: it
+moved from 40% to 54.9%.
+
+### What is new in the repo
+
+`src/web_agent_eval/sites.py` probes every replica host from the URLs in the
+installed task configs. `scripts/preflight.py` is now the only thing that writes
+a manifest for a real run: it asserts the judge **with its control**, probes
+reachability and freezes it into the manifest, records the **served** model
+string beside the requested one, and re-reads the manifest to check population,
+n, exclusion count and reason, concurrency and date before anything starts.
+`scripts/run_batch.py` refuses a real run whose manifest has no reachability
+record, so this is structural rather than remembered. A second probe after the
+run (`postflight.json`) is what proves no host died mid-run — the before-probe
+alone could not.
+
+**55% of episodes ran out of steps at `lean` observation richness.** That is
+`feat-007`'s subject, and entry 16 is what it will be measured against.

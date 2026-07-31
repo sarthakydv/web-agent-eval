@@ -220,6 +220,50 @@ def write(run_dir: Path | str, payload: dict) -> Path:
     return path
 
 
+def subset_rates(payload: dict) -> dict:
+    """The rate split by how the task is scored: `jmespath` checks vs the judge.
+
+    Derived from the same rows the headline is, so it adds nothing to the
+    aggregation's meaning and does not enter the digest. It is reported because
+    the two subsets are **different task shapes** (entry 10): `jmespath` evals
+    check state mutations — did the email get marked read — and `llm_boolean`
+    evals check answer text. Publishing only the combined rate hides which of
+    the two the agent is actually failing, and publishing only the `jmespath`
+    half is the n=47 shortcut entry 10 rejected. A reader gets both.
+    """
+    out = {}
+    for label, want in (("judge (llm_boolean)", True), ("jmespath only", False)):
+        rows = [r for r in payload["tasks"] if r["needs_judge"] is want]
+        terminal = [r for r in rows if r["terminal"]]
+        passed = [r for r in terminal if r["passed"]]
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["status"]] = counts.get(row["status"], 0) + 1
+        out[label] = {
+            "n": len(rows),
+            "terminal": len(terminal),
+            "passed": len(passed),
+            "counts": counts,
+            "rate_over_terminal": (
+                round(len(passed) / len(terminal), 6) if terminal else None
+            ),
+        }
+    return out
+
+
+def subsets(payload: dict) -> str:
+    lines = ["by eval type — different task shapes, so both are stated (entry 10):"]
+    for label, data in subset_rates(payload).items():
+        rate = ("n/a" if data["rate_over_terminal"] is None
+                else f"{data['rate_over_terminal']:.1%}")
+        lines.append(
+            f"  {label:22s} passed {data['passed']}/{data['terminal']} terminal "
+            f"of n={data['n']}  ({rate})  "
+            f"{json.dumps(data['counts'], sort_keys=True)}"
+        )
+    return "\n".join(lines)
+
+
 def render(payload: dict) -> str:
     """The human-readable version. Two cost columns, never added together."""
     lines: list[str] = []
@@ -239,6 +283,8 @@ def render(payload: dict) -> str:
            if payload["rate_over_manifest"] is not None else "")
     )
     lines.append(f"counts: {json.dumps(payload['counts'], sort_keys=True)}")
+    lines.append("")
+    lines.append(subsets(payload))
     lines.append("")
     header = (f"{'task':22s} {'status':9s} {'pass':5s} {'steps':>5s} {'agent tok':>10s} "
               f"{'jcalls':>6s} {'judge tok':>10s} {'judge $':>9s} {'secs':>7s}")
