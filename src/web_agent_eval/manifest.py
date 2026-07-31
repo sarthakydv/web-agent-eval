@@ -73,6 +73,19 @@ def _task_table(version: str = "v1") -> list[tuple[str, str, list[str]]]:
     return table
 
 
+def judged_task_ids(version: str = "v1") -> frozenset[str]:
+    """Every task with at least one `llm_boolean` eval — the ones needing a judge.
+
+    Derived from the installed configs, exactly like `population`, so
+    `feat-005`'s per-episode judge assertion and the manifest's exclusion counts
+    are reading the same table rather than two copies of a number.
+    """
+    return frozenset(
+        task_id for task_id, _site, evals in _task_table(version)
+        if JUDGE_EVAL_TYPE in evals
+    )
+
+
 def site_of(task_id: str) -> str:
     """`v1.fly-unified-2` -> `fly-unified`.
 

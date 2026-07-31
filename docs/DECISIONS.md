@@ -19,6 +19,9 @@ records something that actually ran or a decision taken with its reasoning.
 - **10** (2026-07-31) — The agent is GLM; the scorer is REAL's own judge
 - **11** (2026-07-31) — `feat-003`: the episode loop, and the three caps it is bounded by
 - **12** (2026-07-31) — `feat-004`: what this key really allows, and the batch that survives being killed
+- **13** (2026-07-31) — `feat-005`: the judge really runs, and the reachable population is 102
+- **14** (2026-07-31) — Cost has two halves, and they are not the same kind of number
+- **15** (2026-07-31) — `feat-006` projected from a pilot that ran, with the arithmetic shown
 
 <!-- INDEX:END -->
 
@@ -1209,3 +1212,332 @@ it does say is that the 25-step cap is doing real work at the `lean` observation
 level, which is `feat-006`'s and `feat-007`'s subject. Per-episode cost ran
 8 940 to 74 918 tokens, 23.5 s to 109 s, at concurrency 2–3 — and per entry 7 a
 per-task wall clock at N>1 is not comparable to a sequential one.
+
+---
+
+## 13 — `feat-005`: the judge really runs, and the reachable population is 102
+
+**Date:** 2026-07-31
+**Status:** measured; entry 10's decision is now implemented and verified
+**Reproduce:**
+`uv run python scripts/judge_probe.py` (endpoint assertion),
+`uv run python scripts/judge_probe.py --control` (the assertion, broken on purpose),
+`uv run python scripts/judge_probe.py --task v1.dashdish-1` (one full episode),
+`uv run pytest -q tests/test_judge.py` (offline, no key, no browser)
+
+Entry 10 decided that the scorer is REAL's own `gpt-4.1` judge. That decision
+was worth nothing until the judge was seen to run, because **two ways of not
+running it look exactly like running it**, and both would have produced a
+plausible number.
+
+### The endpoint, asserted rather than assumed
+
+`OpenAI()` is constructed with no arguments in `agisdk`, so it reads
+`OPENAI_BASE_URL` from the environment (entry 9). `.env` carries that variable
+commented out for the optional GLM-as-judge comparison, and a shell that
+exported it — or an uncommented line — would send REAL's judge to z.ai, where
+GLM would grade GLM and nothing in the output would say so.
+
+```
+=== judge endpoint assertion ===
+  OPENAI_BASE_URL_env    = None
+  OPENAI_API_KEY_set     = True
+  OPENAI_API_KEY_prefix  = 'sk-pro…'
+  base_url               = 'https://api.openai.com/v1/'
+  host                   = 'api.openai.com'
+  is_openai              = True
+  model_default          = 'gpt-4.1'
+  ASSERTED: host is api.openai.com and the judge model default is gpt-4.1
+```
+
+`model_default` is read out of `WebCloneEvaluator.__init__`'s signature, not
+copied into this repo, so an agisdk upgrade that changes the judge fails here
+instead of leaving a wrong claim in the README.
+
+**The control, because a gate never seen to fail is not evidence** (AGENTS.md).
+`OPENAI_BASE_URL` set to z.ai, and the same assertion:
+
+```
+=== control: OPENAI_BASE_URL leaked to z.ai ===
+  refused, as it must: the judge would run against
+  'https://api.z.ai/api/coding/paas/v4/' (host 'api.z.ai'), not api.openai.com.
+  OpenAI() reads OPENAI_BASE_URL from the environment ...
+  CONTROL PASSED — the assertion is not vacuous
+```
+
+Every batch run now prints this before its first browser starts, and refuses to
+start if it fails:
+
+```
+judge: 5 of 10 tasks need it; model gpt-4.1, base_url https://api.openai.com/v1/
+       (host api.openai.com), OPENAI_BASE_URL=None
+```
+
+### One task, end to end, with the judge call observed
+
+`v1.dashdish-1` — "What are the first three restaurants listed on the
+homepage?", one `llm_boolean` criterion:
+
+```
+=== episode: v1.dashdish-1 ===
+  has an llm_boolean eval: True
+  outcome=completed reward=1.0 steps=2 agent_tokens=4997 13.9s
+  agisdk evaluate() calls: 1
+  judge model calls:       1
+    -> base_url='https://api.openai.com/v1/' host='api.openai.com'
+       requested='gpt-4.1' served='gpt-4.1-2025-04-14'
+       usage: prompt=140 completion=3 total=143 cached=0  0.99s
+       reply: '1.0'
+       cost at the published rate: $0.000304
+    grade: similarity=1.0 is_correct=True
+       rubric: Does the answer include "Gambinos New York Subs", "Wingstop", and
+               "Man vs Fries" as the first three restaurants?
+       answer: 'Gambinos New York Subs, Wingstop, Man vs. Fries'
+
+  PROVEN: 1 judge call(s) to {'api.openai.com'}, requested {'gpt-4.1'},
+          served {'gpt-4.1-2025-04-14'}, returning a numeric grade.
+```
+
+The base URL in that record is not asserted by this project — it is read off the
+client `agisdk` itself constructed, at the moment it made the call. Nothing here
+reimplements the judge: the real `generate_from_model` runs verbatim and is only
+*wrapped* to mark the window, with `openai`'s `Completions.create` recording any
+call made inside it.
+
+**The alias resolves to a dated snapshot, and that is the good case.** `gpt-4.1`
+was requested and `gpt-4.1-2025-04-14` answered. Entry 9 refused `glm-5.1`
+precisely because `glm-5.2` answered it with no way to pin it; the difference is
+that OpenAI *names the snapshot in the response*, so what is recorded is what
+ran. Every record stores the served string, and a rerun answered by a different
+snapshot shows up as a changed value rather than a silent change of instrument.
+
+### The second failure mode, which the pilot then produced on its own
+
+`agisdk`'s `validate()` only evaluates once the agent has sent a message
+(`len(assistant_messages) > 1`). An episode that caps on steps without answering
+gets `reward = 0.0` from a path where `evaluate()` **never ran**. That is a real
+failure and it counts as one — but it is not a grade, and folding the two
+together would report a judged score over tasks no judge ever saw.
+
+Both counters are recorded per episode. A `jmespath`-only control task,
+`v1.gomail-2`, capped on steps:
+
+```
+=== episode: v1.gomail-2 ===
+  has an llm_boolean eval: False
+  outcome=capped reward=0.0 steps=25 agent_tokens=58971 90.5s
+  agisdk evaluate() calls: 0
+  judge model calls:       0
+```
+
+and in the pilot below, `v1.fly-unified-1` — which *does* carry an `llm_boolean`
+eval — did the same thing and is named in the score rather than absorbed by it.
+
+### So the population is 102, not 47
+
+Entry 5 counted 112 tasks, 10 unreachable (omnizon, HTTP 451), 60 carrying an
+`llm_boolean` eval, and 47 both reachable and scorable on z.ai's key alone.
+With the judge working, **55 of the 102 reachable tasks are judged by
+`gpt-4.1` and the remaining 47 by `jmespath` checks, and all 102 are scorable.**
+`feat-006` runs against `n = 102`, and the 10 omnizon exclusions are published
+beside the rate exactly as entry 5 requires. The arithmetic is asserted against
+the installed task set in `tests/test_judge.py`, so a task set that changes under
+the project fails a test rather than quietly changing what the denominator means.
+
+### Three deliberate breaks, each turning a green test red
+
+| Break | What it models | Result |
+|---|---|---|
+| patch `utils.generate_from_model` | instrumenting a reference nobody calls — `evaluate.py` imported its own | 3 failed, 9 passed; `assert 0 == 1` on judge calls |
+| drop the judge-window guard in `Completions.create` | the agent's own z.ai calls counted as judge tokens | 1 failed; `assert 1 == 0` |
+| give the agent a dollar figure too | the two cost columns summed into one | 1 failed; `assert 0.000882 is None` |
+
+### One more reason for one process per task, found while building this
+
+The probe originally ran two tasks in one process. The second one errored at
+step 0 with zero tokens:
+
+```
+greenlet.error: cannot switch to a different thread (which happens to have exited)
+    at env.reset -> pw.chromium.launch
+```
+
+`agisdk` starts Playwright's **sync** driver once per process and caches it, and
+that driver's greenlet dispatcher is bound to the thread that started it. Every
+episode gets a fresh `BoundedRunner` thread, so the second episode meets a
+dispatcher owned by the first episode's now-exited thread. Entry 12 justified
+one-process-per-task by state contamination from an *abandoned* thread; this is
+a hard technical limit that bites even when nothing was abandoned. `batch.py`
+was already right. The probe now refuses a second task instead of reporting a
+fake failure.
+
+---
+
+## 14 — Cost has two halves, and they are not the same kind of number
+
+**Date:** 2026-07-31
+**Status:** decided at `feat-005`, and it governs every cost figure this project publishes
+
+Until now this project had one cost claim: **tokens per task, no dollars**,
+because z.ai publishes no rate for a Coding Plan key and the sibling project
+correctly refused to invent one. `feat-005` adds a second provider that *does*
+publish a rate, and the temptation is to produce a single "cost" figure. That
+would be wrong, and it is refused here before any number exists to argue about.
+
+| | AGENT | JUDGE |
+|---|---|---|
+| what | drives the browser, 25 steps of it | grades `llm_boolean` answers, one call each |
+| model | `glm-4.6` (entry 9) | `gpt-4.1`, served as `gpt-4.1-2025-04-14` |
+| provider | z.ai **Coding Plan** | OpenAI |
+| published rate | **none for this plan** | yes |
+| cost is reported as | **tokens, full stop** | **dollars**: published rate x measured tokens |
+| pilot figure | 344 473 tokens over 10 tasks | $0.001298 over 4 calls |
+
+**They are never summed, and never share a column.** Summing them would require
+a dollar figure for the agent, which does not exist; anything printed in that
+cell would be an estimate wearing a measurement's clothes. The absence is
+deliberate and it is stated wherever the number appears rather than left as a
+gap someone helpfully fills in later. `tests/test_scoring.py` asserts the
+agent's dollar cell is `None` and that no `$` appears in the agent's row; giving
+the agent a rate turns that test red (entry 13's third break).
+
+**The judge's dollars are honest because both factors are measured.** The rate
+is $2.00 / 1M input and $8.00 / 1M output for `gpt-4.1`, Standard mode,
+retrieved **2026-07-31** from `https://developers.openai.com/api/docs/pricing`;
+the date travels with the figure because a rate is a fact about a day. The
+tokens come from the provider's own `usage` on each response, not from a local
+encoder — entry 6 measured `cl100k` understating z.ai's `prompt_tokens` by 1.5%,
+and there is no reason to introduce that error where the provider reports the
+truth. Cached prompt tokens bill at $0.50 / 1M and are subtracted from the
+uncached count rather than charged twice; the pilot observed `cached=0`
+throughout, which is expected — judge prompts are ~150 tokens and OpenAI's
+prompt cache needs 1 024.
+
+**The agent's tokens still come from the provider too**, per entry 6, so the two
+columns differ in what can be said about them, not in how carefully either was
+counted.
+
+---
+
+## 15 — `feat-006` projected from a pilot that ran, with the arithmetic shown
+
+**Date:** 2026-07-31
+**Status:** measurement; replaces every runtime estimate for `feat-006`
+**Reproduce:**
+`uv run python scripts/score.py --run-id pilot`,
+`uv run python scripts/score.py --run-id pilot --check`,
+`uv run python scripts/project_run.py --from-run pilot --population 102`
+
+### The pilot
+
+Ten tasks, one per reachable site, five carrying an `llm_boolean` eval and five
+not, at the default concurrency of 3. Chosen for eval-type and site coverage —
+**not a random sample, so its rate is not a success rate** and must not be
+quoted as one, exactly as entry 12 says of `feat-004`'s eleven episodes.
+
+```
+task                   status    pass  steps  agent tok jcalls  judge tok   judge $    secs
+-------------------------------------------------------------------------------------------
+v1.dashdish-10         capped    no       25      40469      0          0   0.00000   126.6
+v1.fly-unified-1       capped    no       25      75407      0          0   0.00000   135.1
+v1.gocalendar-1        capped    no       25      79190      0          0   0.00000   214.0
+v1.gomail-1            passed    yes       3       4464      1        126   0.00027    19.1
+v1.networkin-1         passed    yes       6      11917      0          0   0.00000    42.8
+v1.opendining-1        failed    no        1       2218      1        182   0.00038    12.3
+v1.staynb-2            capped    no       25      71382      0          0   0.00000   115.8
+v1.topwork-5           failed    no       11      14273      1        168   0.00035    54.7
+v1.udriver-1           passed    yes      17      29330      0          0   0.00000    69.8
+v1.zilloft-1           passed    yes      11      15823      1        137   0.00029    48.1
+
+  AGENT  glm-4.6 on z.ai Coding Plan: 344473 tokens over 10 tasks
+         (mean 34447.3, min 2218, max 79190); USD: none — no published rate
+  JUDGE  gpt-4.1 on OpenAI: 4 calls, 601 prompt + 12 completion tokens = $0.001298
+         judged 4 of the 5 terminal tasks that carry an llm_boolean eval;
+         hosts ['api.openai.com'], served ['gpt-4.1-2025-04-14']
+         NOT judged (agent never answered, so agisdk's evaluate() never ran):
+         v1.fly-unified-1
+wall clock: {"n": 10, "total": 838.232, "mean": 83.823, "min": 12.318, "max": 213.959}
+```
+
+Four of ten capped on the 25-step cap, and **the capped episodes cost an order
+of magnitude more than the passing ones** — 40 469–79 190 tokens against
+4 464–29 330. That single fact dominates everything below.
+
+### The aggregate reproduces from the records alone
+
+`scripts/score.py` reads `manifest.json` and `records/*.json` and nothing else —
+not `results.tsv`, not any state from the run that produced them:
+
+```
+score reproduces from runs/pilot/records/ alone
+  digest 7e674db65736d8a76cd93f7a32590897869e77bbf2dd6efafd4e531ee3e0db87
+  passed 4/10 terminal, agent 344473 tokens, judge 613 tokens = $0.001298
+```
+
+**The control.** On a copy of the run with one task's stored `status` flipped
+from `passed` to `failed`:
+
+```
+RECOMPUTED SCORE DIFFERS FROM THE STORED ONE
+  stored     digest: 7e674db6...
+  recomputed digest: 3189ba59...
+  differs: counts, passed, rate_over_manifest, rate_over_terminal, tasks
+exit=1
+```
+
+The digest covers every per-task row, not the headline rate, because two
+different runs can share a rate. Editing one task's token count by a single
+token — which leaves the rate identical — also changes it, and that is a test.
+
+### The projection to n = 102
+
+```
+AGENT TOKENS (no dollar figure — z.ai publishes no rate for this Coding Plan key)
+  central   102 x 34,447.3 = 3,513,625 tokens
+  bounds    102 x 2,218 = 226,236  ..  102 x 79,190 = 8,077,380
+
+WALL CLOCK at concurrency 3
+  from the round   287.0s / 10 = 28.70s per task  ->  102 x 28.70 = 2,928s = 48.8 min
+  from the sum     83.8s / 3 = 27.94s per task    ->  102 x 27.94 = 2,850s = 47.5 min
+  the two agree within 2.7%
+
+JUDGE COST (OpenAI publishes a rate, so this one is in dollars)
+  55 of the 102 tasks carry an llm_boolean eval, 59 such evals in total
+  measured per call: 150.2 prompt + 3.0 completion tokens
+  59 x 150.2 = 8,865 prompt tokens; 59 x 3.0 = 177 completion
+  $2.0/1M x 8,865 + $8.0/1M x 177 = $0.0191
+```
+
+**`feat-006` should be scheduled for roughly 50 minutes of wall clock and
+~3.5M agent tokens, and its judge will cost about two cents.** Note 59 evals
+across 55 tasks: four tasks carry more than one `llm_boolean` criterion, and
+projecting per *task* would have undercounted.
+
+The $0.0191 is a **ceiling** — it assumes every judged task's agent answers, so
+every eval reaches the judge. One of five did not in the pilot. Judge cost is
+not a constraint on this run at any plausible outcome, and that is the useful
+conclusion: the thing worth watching is agent tokens and wall clock.
+
+### What this projection is not
+
+* **Ten tasks.** The bounds above are "every task behaves like the cheapest or
+  dearest one measured", not a confidence interval; ten tasks does not support
+  one.
+* **The cap rate is the dominant term and the least well measured.** 4 of 10
+  capped here. If `feat-006` caps at 60% the token total moves toward 5M; at 20%
+  toward 2.5M. This is the number to re-check after the first round.
+* **The site constraint never bound.** One task per site meant entry 7's "no two
+  episodes on one site" rule was never reached. Over 102 tasks on 10 sites it
+  binds only in the closing tasks, and it can only make the run slower.
+* **Per-task wall clock at concurrency 3 is not comparable to sequential**
+  (entry 7). The 48.8 min is a run-level figure at N=3 and nothing else.
+* **A restart adds setup, not episodes.** Terminal tasks are never re-run, so a
+  kill mid-run costs the in-flight episodes and nothing more.
+
+### Budget recommendation for `feat-006`
+
+`--budget-tokens 8000000` and `--budget-wall-clock-s 10800` (3 h). Both sit
+above the pessimistic bound rather than the central estimate, because exiting 2
+on a budget is a stop, not a failure, and a budget tuned to the expected case
+would turn an unlucky cap rate into an interrupted run. The point of the numbers
+is that `feat-006` is now scheduled against a measurement.

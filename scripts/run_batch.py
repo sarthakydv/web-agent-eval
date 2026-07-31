@@ -28,8 +28,31 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from web_agent_eval import batch, cli, records
+from web_agent_eval import batch, cli, judge, records
 from web_agent_eval import manifest as manifest_module
+
+
+def check_judge(manifest) -> int:
+    """Assert the judge before the first browser starts, if any task needs it.
+
+    Each worker asserts this too, but a misconfiguration found on task 1 of 102
+    has already spent an episode and, worse, would keep going. The assertion is
+    cheap and it is printed, so every run's log carries where its judge was
+    pointed rather than leaving it to be inferred. DECISIONS entry 10.
+    """
+    needed = judge.judged_in(manifest.task_ids)
+    if not needed:
+        print("judge: no task in this manifest has an llm_boolean eval — not required")
+        return 0
+    try:
+        info = judge.require()
+    except (judge.JudgeUnavailable, judge.JudgeMisrouted) as exc:
+        print(f"cannot start: {exc}", file=sys.stderr)
+        return 1
+    print(f"judge: {len(needed)} of {len(manifest.task_ids)} tasks need it; "
+          f"model {info['model_default']}, base_url {info['base_url']} "
+          f"(host {info['host']}), OPENAI_BASE_URL={info['OPENAI_BASE_URL_env']!r}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
         manifest = manifest_module.ensure(run_dir, cli.manifest_for(args))
     except (manifest_module.ManifestFrozen, ValueError, RuntimeError) as exc:
         print(f"cannot start: {exc}", file=sys.stderr)
+        return 1
+
+    if args.entrypoint == cli.DEFAULT_ENTRYPOINT and check_judge(manifest) != 0:
         return 1
 
     # Workers live in this process group, so one signal reaches the browsers too.

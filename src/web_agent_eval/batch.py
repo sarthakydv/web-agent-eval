@@ -86,10 +86,24 @@ def real_episode(task_id: str, *, caps: Caps, output_path: Path, level: str = "l
 
     Imported inside the function so the parent process never pulls in agisdk,
     Playwright or the model client — only the workers do.
+
+    **The judge is instrumented before the episode starts** (`feat-005`,
+    DECISIONS entry 10). agisdk grades `llm_boolean` evals with its own OpenAI
+    judge, and two things have to be recorded rather than assumed: that the
+    judge was actually called, and that it was called against OpenAI rather
+    than against whatever `OPENAI_BASE_URL` happened to hold. A task that needs
+    the judge refuses to run if either is wrong, because a misrouted judge
+    produces a score that looks exactly like a good one.
     """
+    from web_agent_eval import judge
     from web_agent_eval.environment import agisdk_env_factory
     from web_agent_eval.episode import run_episode
     from web_agent_eval.policy import glm_policy_factory
+
+    judge.reset()
+    needs_judge = judge.task_needs_judge(task_id)
+    endpoint_info = judge.require() if needs_judge else judge.endpoint()
+    judge.install(endpoint_info=endpoint_info)
 
     record = run_episode(
         task_id,
@@ -98,7 +112,10 @@ def real_episode(task_id: str, *, caps: Caps, output_path: Path, level: str = "l
         caps=caps,
         output_path=output_path,
     )
-    return record.to_dict()
+    data = record.to_dict()
+    data["needs_judge"] = needs_judge
+    data["judge"] = judge.ledger().to_dict()
+    return data
 
 
 # --------------------------------------------------------------------------
@@ -167,6 +184,11 @@ def _worker(
         "error": record.get("error"),
         "cleanup": record.get("cleanup"),
         "level_name": record.get("level_name"),
+        # feat-005: the judge's own accounting travels in the terminal record,
+        # because the terminal records are the only thing the aggregation is
+        # allowed to read (see `scoring.py`).
+        "needs_judge": record.get("needs_judge"),
+        "judge": record.get("judge"),
         "episode_path": str(episode_path),
     }
 

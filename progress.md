@@ -3,14 +3,18 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001` … `feat-004` are done, next is `feat-005`
+**Active Feature:** none — `feat-001` … `feat-005` are done, next is `feat-006`
 **Status:** the `[GATE]` is through (one REAL task scored **1.0**), the
 observation serializer exists with richness as a parameter and a measured token
-budget, the **episode loop is built and bounded**, and the **batch runner and
-supervisor are built, tested and proven against a real SIGKILL, a real 429 and a
-real budget overrun**. `feat-005` is **blocked on a human step**: the
-`OPENAI_API_KEY` placeholder in `.env` must be filled (entry 10). The repo is
-**public** at `github.com/sarthakydv/web-agent-eval` with CI green.
+budget, the **episode loop is built and bounded**, the **batch runner and
+supervisor are proven against a real SIGKILL, a real 429 and a real budget
+overrun**, and **scoring and cost recording are done**: REAL's own `gpt-4.1`
+judge has been seen to run against OpenAI and return a grade, a 10-task pilot
+produced per-task pass/fail and per-task tokens, and the aggregate reproduces
+from the stored records alone. **The reachable population is 102, not 47.**
+`feat-006` — the long unattended run — is next and is **left for a human to
+start**. The repo is **public** at `github.com/sarthakydv/web-agent-eval` with
+CI green.
 
 ## Status
 
@@ -109,23 +113,43 @@ real budget overrun**. `feat-005` is **blocked on a human step**: the
       scans confirmed no key and no `.env`/credential blob anywhere in history,
       including inside the gzipped and PNG fixtures — entry 8.
 
+- [x] **`feat-005`: the judge runs, and it runs against OpenAI.** `OPENAI_API_KEY`
+      is filled. The endpoint is asserted before any run starts and the run
+      refuses if it is wrong; the assertion was broken on purpose with
+      `OPENAI_BASE_URL` pointed at z.ai and confirmed to refuse. One
+      `llm_boolean` task ran end to end with the judge call observed —
+      `base_url='https://api.openai.com/v1/'`, requested `gpt-4.1`, served
+      `gpt-4.1-2025-04-14`, 140 prompt + 3 completion tokens, reply `'1.0'` —
+      entry 13.
+- [x] **The reachable population is 102, not 47.** 55 of the 102 are graded by
+      `gpt-4.1`, the other 47 by `jmespath` checks, and the arithmetic is
+      asserted against the installed task set rather than restated — entry 13.
+- [x] **A 10-task pilot, one per reachable site, produced per-task pass/fail and
+      per-task tokens**, and the aggregate reproduces from
+      `runs/pilot/records/` alone. A copy with one status flipped fails the
+      check — entry 15.
+- [x] **Cost has two columns and they are never summed** — agent tokens with no
+      dollar figure (z.ai publishes no rate for this Coding Plan key), judge
+      dollars from a published rate times measured usage, with the rate's date —
+      entry 14.
+
 ### What's In Progress
 
-- Nothing. Stopped after `feat-004` as instructed, before `feat-005`.
+- Nothing. Stopped after `feat-005` as instructed, before `feat-006`.
 
 ### What's Next
 
-1. **`feat-005` needs a human step first: fill `OPENAI_API_KEY` in `.env`.**
-   It is a placeholder today. 60 of the 112 tasks have an `llm_boolean` eval
-   that agisdk grades with a hardcoded OpenAI `gpt-4.1` judge (entries 4 and
-   10), so without it the population is 47 rather than 102 and the denominator
-   stops being comparable to REAL's published baseline.
-2. `feat-006` chooses the population — 112, 102 or 47 — and the runner already
-   freezes that choice into `runs/<run-id>/manifest.json` with every exclusion
-   and its reason. `--population 47` runs today with no OpenAI key at all.
-3. The full run is `uv run python scripts/supervise.py --run-id <id>
-   --population <112|102|47>`; it resumes on its own after any interruption and
-   is a no-op once complete.
+1. **`feat-006` is the long unattended run, and a human decides when it starts.**
+   Everything it needs is measured: population `102`, roughly **49 minutes** of
+   wall clock at concurrency 3 and **~3.5M agent tokens**, with a judge bill of
+   about **two cents** — entry 15 shows the arithmetic.
+2. The command is `uv run python scripts/supervise.py --run-id <id>
+   --population 102 --budget-tokens 8000000 --budget-wall-clock-s 10800`. It
+   resumes on its own after any interruption and is a no-op once complete.
+3. Score it with `uv run python scripts/score.py --run-id <id>`, then
+   `--check` to confirm the published figure comes back out of the records.
+4. `feat-006` must publish `n = 102` with the 10 omnizon exclusions and their
+   reason beside the rate, and state it against REAL's published ≤41% baseline.
 
 ## Blockers / Risks
 
@@ -133,10 +157,24 @@ real budget overrun**. `feat-005` is **blocked on a human step**: the
       HTTP 451 `DMCA_TAKEDOWN`. `feat-006`'s denominator is **n = 102** unless
       the site returns, and the count and reason must be published beside the
       rate — DECISIONS entry 5.
-- [ ] **60 of the 112 tasks are graded by an OpenAI judge, not by z.ai.**
-      `WebCloneEvaluator` hardcodes `gpt-4.1` for `llm_boolean` evals. This is a
-      cost and comparability question `feat-005` must answer. 47 tasks are both
-      reachable and scorable with no key but z.ai's.
+- [x] **60 of the 112 tasks are graded by an OpenAI judge, not by z.ai.**
+      Answered by `feat-005`: the key is filled, the judge has been seen to run
+      against `api.openai.com`, and **all 102 reachable tasks are scorable**.
+      The judge's whole bill for the full run projects to about **$0.02**, so
+      cost was never the real question — comparability was, and using REAL's own
+      scorer settles it. Entries 13 and 14.
+- [ ] **A misrouted judge would look exactly like a working one.** `OpenAI()`
+      takes no arguments in agisdk and reads `OPENAI_BASE_URL`, so an exported
+      value would send the judge to z.ai and GLM would grade GLM. Every run now
+      asserts the endpoint before its first browser starts and refuses on
+      failure — but the risk lives in the environment, not in this repo, so it
+      stays listed. Never uncomment `OPENAI_BASE_URL` in `.env` except for
+      entry 10's optional GLM-as-judge comparison, which must opt in explicitly.
+- [ ] **A capped episode that never answered is a real zero but not a graded
+      one.** agisdk's `validate()` only evaluates once the agent has sent a
+      message. `v1.fly-unified-1` did exactly this in the pilot. It counts
+      against the rate; it must not be described as the judge rejecting it.
+      `score.py` names such tasks separately — entry 13.
 - [ ] **Hosted, not local.** The sites are on Vercel; network latency stays.
       Round trips measured 0.13 s–2.37 s. The migration bought determinism, not
       speed — DECISIONS entry 4, Q2.
@@ -185,10 +223,36 @@ real budget overrun**. `feat-005` is **blocked on a human step**: the
 - **Concurrency default stays 3 despite the probe.** The measurement removed the
   provider constraint; the site rule and comparability remain, and raising the
   default is a human scoping decision — entry 12.
+- **The judge's endpoint is asserted, not assumed**, before any run starts, and
+  a run whose judge would go anywhere but `api.openai.com` refuses to start —
+  entry 13.
+- **What is recorded is the model the server *served*.** OpenAI answered the
+  `gpt-4.1` alias with `gpt-4.1-2025-04-14` and named the snapshot; entry 9's
+  z.ai case did not. Both are recorded as served — entry 13.
+- **"Judged" and "never judged" are counted apart.** A capped episode that never
+  answered is a real zero, not a grade — entry 13.
+- **Cost has two columns and they are never summed**: agent tokens with no
+  dollars (no published rate for this plan), judge dollars from a published rate
+  times measured usage, carrying the rate's date — entry 14.
+- **A published figure must recompute from the stored records alone**, and the
+  check compares a digest of every per-task row rather than the headline rate,
+  which two different runs can share — entry 15.
 
 ## Files Modified This Session
 
-`feat-004`, the batch runner and supervisor: `src/web_agent_eval/{manifest,
+`feat-005`, scoring and cost recording: `src/web_agent_eval/{judge,scoring}.py`
+(new), `scripts/{judge_probe,score,project_run}.py` (new),
+`tests/{test_judge,test_scoring}.py` (new, 20 tests),
+`src/web_agent_eval/batch.py` (`real_episode` asserts and instruments the judge,
+and the terminal record carries the judge ledger),
+`src/web_agent_eval/manifest.py` (`judged_task_ids`, so the judge check and the
+manifest's exclusion counts read one table), `scripts/run_batch.py` (asserts the
+judge before the first browser starts), `feature_list.json`, `docs/DECISIONS.md`
+(entries 13, 14, 15), `progress.md`, `session-handoff.md`. Nothing in
+`feat-003`'s loop or `feat-004`'s round logic was changed.
+
+Previous session — `feat-004`, the batch runner and supervisor:
+`src/web_agent_eval/{manifest,
 records,batch,cli}.py` (new), `scripts/{run_batch,supervise,concurrency_probe}.py`
 (new), `tests/{test_resume,test_supervise,fake_episodes}.py` (new),
 `feature_list.json`, `docs/DECISIONS.md` (entry 12), `progress.md`,
@@ -241,7 +305,20 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
       deliberate breaks confirmed the suite is not vacuous — entry 12.
 - [x] Concurrency probe: burst 2–12 all accepted, and 315 sustained calls over
       7 minutes at the run's cadence with zero rejections — entry 12.
-- [x] Tests pass: `uv run pytest -q` → `126 passed in 117.98s`
+- [x] `feat-005` verification, with its controls: the judge endpoint asserted
+      (`host api.openai.com`, `model_default gpt-4.1`) and the assertion broken
+      on purpose with `OPENAI_BASE_URL` set to z.ai → refused; `v1.dashdish-1`
+      run end to end with **1 judge call**, `served gpt-4.1-2025-04-14`,
+      `usage prompt=140 completion=3`, `reply '1.0'`, `similarity=1.0`; the
+      `jmespath`-only control `v1.gomail-2` → **0 judge calls**; a 10-task pilot
+      → `10/10 terminal, 344473 tokens, {"capped": 4, "failed": 2, "passed": 4}`;
+      `score.py --check` reproduces the digest twice and **exits 1** on a copy
+      with one status flipped. Three deliberate breaks turned the new suite red —
+      entries 13, 14, 15.
+- [x] `feat-006` projection from that pilot: `102 x 34,447.3 = 3,513,625` agent
+      tokens, `102 x 28.70s = 2,928s = 48.8 min` at concurrency 3, judge ceiling
+      `$0.0191` over 59 `llm_boolean` evals — entry 15.
+- [x] Tests pass: `uv run pytest -q` → `146 passed in 114.80s`
 - [x] Lint clean: `uv run ruff check .` → `All checks passed!`
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
 
@@ -282,4 +359,20 @@ verified against a fake that reproduces the condition exactly
 Two accounting lines exist now and must never be mixed: **budget accounting** is
 local `tiktoken` over a rendered observation; **cost accounting** (`feat-005`) is
 the provider's `usage` field summed from real responses. Entry 4's 20 931 is the
-second kind.
+second kind. Cost accounting now has **two providers in two columns** and they
+are never summed — entry 14.
+
+**One process runs one task, and there is now a second, harder reason.** Entry 12
+gave the state-contamination reason. Building `feat-005`'s probe produced the
+other: `agisdk` starts Playwright's *sync* driver once per process and caches it,
+and the driver's greenlet dispatcher is bound to the thread that started it.
+Every episode gets a fresh `BoundedRunner` thread, so a second episode in the
+same process dies at `env.reset` with `greenlet.error: cannot switch to a
+different thread (which happens to have exited)` — zero steps, zero tokens.
+`batch.py` was already right; `scripts/judge_probe.py` now refuses a second
+`--task` rather than reporting a fake failure. Entry 13.
+
+**The pilot's 4/10 is not a success rate**, for the same reason `feat-004`'s
+11 episodes are not: the tasks were chosen for site and eval-type coverage, `n`
+is 10, and the population is `explicit`. It is a *cost* measurement, and that is
+all `feat-006` should take from it.
