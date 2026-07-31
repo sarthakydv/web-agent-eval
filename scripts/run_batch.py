@@ -85,8 +85,13 @@ def main(argv: list[str] | None = None) -> int:
     # Workers live in this process group, so one signal reaches the browsers too.
     batch.install_kill_on_parent_death()
 
+    # The level comes from the frozen manifest, not from this invocation:
+    # `feat-007` compares two runs that differ in exactly this field, and a
+    # round that took it from the command line could make half a run's records
+    # one arm and half the other (DECISIONS entry 17).
+    level = cli.level_for(args, manifest)
     print(f"run {manifest.run_id}: population {manifest.population} "
-          f"(n={manifest.size}), caps {manifest.caps}, entrypoint "
+          f"(n={manifest.size}), caps {manifest.caps}, level {level}, entrypoint "
           f"{manifest.episode_entrypoint}")
 
     result = batch.run_round(
@@ -96,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         concurrency=args.concurrency,
         budget=cli.budget_for(args),
         run_started=cli.run_started_monotonic(manifest),
-        level=args.level,
+        level=level,
     )
     batch.write_round_log(run_dir, result)
 

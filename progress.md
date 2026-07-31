@@ -3,7 +3,7 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001` … `feat-005` are done, next is `feat-006`
+**Active Feature:** none — `feat-001` … `feat-007` are done, one feature remains
 **Status:** the `[GATE]` is through (one REAL task scored **1.0**), the
 observation serializer exists with richness as a parameter and a measured token
 budget, the **episode loop is built and bounded**, the **batch runner and
@@ -12,9 +12,13 @@ overrun**, and **scoring and cost recording are done**: REAL's own `gpt-4.1`
 judge has been seen to run against OpenAI and return a grade, a 10-task pilot
 produced per-task pass/fail and per-task tokens, and the aggregate reproduces
 from the stored records alone. **The reachable population is 102, not 47.**
-`feat-006` — the long unattended run — is next and is **left for a human to
-start**. The repo is **public** at `github.com/sarthakydv/web-agent-eval` with
-CI green.
+`feat-006` produced the headline: **18 of 102 = 17.6%** at a 25-step cap.
+`feat-007` then measured both things that number left open — richer observation
+is **+4.9 points at p = 0.302 and 5.18x the tokens**, and doubling the step cap
+converted **3 of the 56** capped tasks, so the cap was **not** what was binding.
+Along the way it measured a **17.9% run-to-run flip rate at `temperature=0`**,
+which bounds every small delta in this repo. The repo is **public** at
+`github.com/sarthakydv/web-agent-eval` with CI green.
 
 ## Status
 
@@ -439,3 +443,79 @@ alone could not.
 
 **55% of episodes ran out of steps at `lean` observation richness.** That is
 `feat-007`'s subject, and entry 16 is what it will be measured against.
+
+---
+
+## `feat-007` — the ablation and the cap, run 2026-07-31
+
+Two runs, both clean, **zero provider errors between them**: `runs/rich102/`
+(102 tasks at `rich`, 111.6 min) and `runs/cap50/` (the 56 previously-capped
+tasks at 50 steps, 67.0 min). Entry 17 has the full account.
+
+### The ablation did not detect an effect, and cost 5.18x to find that out
+
+```
+  full102  lean   18/102  17.65%    4.00 M agent tokens
+  rich102  rich   23/102  22.55%   20.72 M agent tokens   x5.18
+  delta            +5      +4.90 points
+  paired: 13 both, 5 only lean, 10 only rich, 74 neither
+  McNemar exact, two-sided, 15 discordant pairs:  p = 0.302
+```
+
+Reported as "no effect detected at n = 102", not as a small win. Two things
+under the aggregate: the judge-scored half went **+14.5 points** and the
+`jmespath` half **−6.4** (opposite directions, on a split fixed in entry 10
+before either arm ran), and `rich` hit the 12 000-token observation budget on
+**72.6% of its steps** against `lean`'s 0.2% — so the comparison is `lean`
+against `rich` clipped to the budget, exactly the risk entry 6 named.
+
+Holding the caps constant across arms (entry 7's rule, and what makes the delta
+attributable) cost the rich arm: 4 rich episodes ended on the 300 s wall-clock
+cap and 16 came within 10% of it, against **zero** lean episodes past 270 s. So
+22.55% is a floor for `rich`.
+
+### The step cap was not the binding constraint
+
+The obvious hole in entry 16 — 56 of 102 episodes ran out of steps, so 17.6% was
+a lower bound at that cap. Re-running exactly those 56 at double the cap:
+
+```
+  converted to a pass   3    still out of steps  40 (all at exactly 50 steps)
+  now failed           13    errored              0
+  composite: (18 + 3)/102 = 20.59% at 50 steps — a construction, not a run
+```
+
+**Forty tasks burned fifty steps and still did not finish.** The agent stalls;
+the budget was not what was holding the number down, and **17.6% at 25 steps is
+a capability number**. The less convenient answer, and the one the run gave.
+
+Doubling the step cap alone would have measured the wrong thing:
+`scripts/cap_budget.py --max-steps 50` exits **1** at the old 400 000-token cap
+(headroom 0.55x — the token cap fires first). The token and wall-clock caps were
+scaled with it so the **per-step allowance is unchanged** at 16 000 tokens and
+12 s. It worked: all 40 caps in `cap50` are step caps, max wall clock 334 s of
+600 and max spend 235 398 of 800 000.
+
+### The accidental measurement, and it bounds everything above
+
+Ten of the 56 tasks terminated **within the old 25-step budget** on this attempt,
+having exhausted it on the last. Same level, same model, `temperature=0.0` — not
+the higher cap, not the caps at all.
+
+**17.9% of episodes land somewhere materially different on a re-run.** Two of
+the ten flipped to a pass. That is the noise floor an ablation chasing five
+tasks is working underneath, and it is why p = 0.302 reads as "no effect
+detected". Determinism in the environment is not determinism in the agent.
+
+### What is new in the repo
+
+The richness level is now a **frozen manifest field** — `manifest.ensure`
+refuses a resume that contradicts it and `run_batch.py` takes the level from the
+manifest, not its own flag, so a half-lean half-rich run is unreachable by
+mistyping. Legacy manifests read as unrecorded rather than conflicting, so
+`full102` stays resumable and `supervise.py` stays idempotent on it.
+`scripts/ablation.py` **refuses to print a delta** until it has proved from the
+two manifests that the runs differ in one thing; seven refusals, each tested
+alongside the case where it must not fire (`tests/test_ablation.py`, 24 tests).
+`scripts/cap_budget.py` takes `--max-steps` and prints the per-step allowance.
+`scripts/preflight.py` handles an explicit task subset and checks the level.

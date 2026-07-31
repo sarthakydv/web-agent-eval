@@ -23,6 +23,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **14** (2026-07-31) — Cost has two halves, and they are not the same kind of number
 - **15** (2026-07-31) — `feat-006` projected from a pilot that ran, with the arithmetic shown
 - **16** (2026-07-31) — `feat-006`: the headline number is **17.6% over n = 102**
+- **17** (2026-07-31) — `feat-007`: the ablation is inside the noise, and the step cap was not what was binding
 
 <!-- INDEX:END -->
 
@@ -1729,3 +1730,258 @@ remembered.
 17.6% against a ≤41% ceiling, with 55% of episodes running out of steps at
 `lean` observation richness. The step cap and the observation level are
 `feat-007`'s subject, and this entry is what it will be measured against.
+
+---
+
+## 17 — `feat-007`: the ablation is inside the noise, and the step cap was not what was binding
+
+**Date:** 2026-07-31
+**Status:** measured. Two runs, two questions. **Neither number replaces entry 16's
+17.6%**, and both are published with their own `n` and their own caps.
+**Runs:** `runs/rich102/` (the ablation's second arm), `runs/cap50/` (cap sensitivity)
+**Agent:** `glm-4.6` requested, **`glm-4.6` served**, z.ai Coding Plan endpoint
+**Scorer:** `gpt-4.1` requested, **`gpt-4.1-2025-04-14` served**, `api.openai.com`
+**Concurrency:** 3 configured, 3 throughout, **zero provider errors in either run**
+**Reproduce:**
+`uv run python scripts/ablation.py arms --a full102 --b rich102`,
+`uv run python scripts/ablation.py cap --baseline full102 --higher cap50`,
+`uv run python scripts/score.py --run-id rich102 --check`,
+`uv run python scripts/score.py --run-id cap50 --check`
+
+### The comparison is checked before it is printed
+
+Both halves of this feature are a subtraction between two runs, and a subtraction
+between two runs means nothing unless they differ in one thing. So
+`scripts/ablation.py` **refuses to print a delta** until it has established that,
+from the two frozen manifests, and prints what it checked:
+
+```
+=== is this a comparison of one thing? ===
+  same task_ids           102 ids, identical
+  same caps               {'max_steps': 25, 'max_tokens': 400000, 'max_wall_clock_s': 300.0}
+  same model              'glm-4.6'
+  same episode_entrypoint 'web_agent_eval.batch:real_episode'
+  same population         '102'
+  differs: level         'lean' vs 'rich'  <- the ablation
+```
+
+That is only worth anything if the refusal can fire, so each check is tested both
+ways in `tests/test_ablation.py`: two arms at the same level, arms whose caps
+differ, arms over different task sets, a delta against an unfinished arm, a
+cap-sensitivity run whose task list is not the baseline's capped set, one at the
+same step cap, one at a different richness. Seven refusals, each with the case
+where it must **not** fire beside it.
+
+The richness a run executed at is now a **frozen manifest field**, not a phrase
+in `note`. `manifest.ensure` refuses a resume that contradicts it and
+`run_batch.py` takes the level from the manifest rather than from its own flag,
+so a run whose records are half one arm and half the other is no longer
+reachable by typing the wrong thing. Manifests written before the field existed
+(entry 16's `full102`) read as unrecorded rather than as conflicting — otherwise
+the freeze would have made every earlier run unresumable, and entry 7 requires
+`supervise.py` to stay idempotent on them.
+
+### Part 1 — `rich` is +4.9 points, and that is inside the noise
+
+```
+                      passed / n        rate      counts
+  full102  lean        18 / 102       17.65%      {"capped": 56, "errored": 2, "failed": 26, "passed": 18}
+  rich102  rich        23 / 102       22.55%      {"capped": 60, "failed": 19, "passed": 23}
+  ----------------------------------------------------------------------------
+  delta   rich - lean   +5 tasks       +4.90 points
+```
+
+The same 102 tasks under the same caps, so the arms are **paired** and the two
+totals are not the informative quantity — the tasks that changed verdict are:
+
+```
+  passed in both        13
+  only lean              5   v1.dashdish-2, v1.gomail-2, v1.topwork-3, v1.topwork-4, v1.zilloft-5
+  only rich             10   v1.gocalendar-9, v1.gomail-4, v1.gomail-6, v1.networkin-2, v1.networkin-4,
+                             v1.opendining-1, v1.staynb-1, v1.staynb-3, v1.udriver-10, v1.udriver-5
+  passed in neither     74
+  McNemar exact, two-sided, on the 15 discordant pairs:  p = 0.302
+```
+
+**Five tasks of 102 is not a result.** Fifteen tasks flipped, ten of them toward
+`rich`, and a coin lands 10-or-better out of 15 about three times in ten. The
+honest statement is that this ablation did not detect an effect at n = 102 —
+not that richness does nothing, and not that it helps. Part 2 puts a number on
+the noise floor that makes this concrete.
+
+**What the aggregate hides.** The split by eval type was fixed in entry 10,
+before either arm ran, so this is not a slice chosen after seeing the data — and
+the two halves move in opposite directions:
+
+```
+                       lean          rich         delta      discordant   p
+  judge (llm_boolean)   8/55 14.5%   16/55 29.1%  +14.5 pts   1 / 9      0.021
+  jmespath only        10/47 21.3%    7/47 14.9%   -6.4 pts   4 / 1      0.375
+```
+
+`llm_boolean` evals grade **answer text**; `jmespath` evals check **state
+mutations** — did the email actually get marked read. A reading that fits is
+that a richer page description helps the agent describe what it sees and does
+not help it operate the page. It is one of two comparisons on n = 55 and n = 47,
+so it is a lead worth recording, not a finding.
+
+**The rich arm paid for the rule that made the comparison valid.** Entry 7 and
+entry 11 both require the caps held constant across arms, and they were. That
+constraint is not free:
+
+```
+  capped by       lean  {"steps": 56}
+                  rich  {"steps": 56, "wall_clock": 4}
+  episodes >= 270s of the 300 s cap    lean 0     rich 16
+  wall clock per episode, mean          97.5 s    173.5 s
+```
+
+The 300 s bound was set at `lean` (entry 11) and `rich` episodes are 1.8x
+slower, so four rich episodes were ended by a cap that never touched a lean one
+and sixteen came within 10% of it. **22.55% is therefore a floor for `rich`, not
+a ceiling.** Holding the caps was still right — a cap tuned per arm would have
+made the delta a comparison of two experiments — but the cost is stated rather
+than absorbed.
+
+**And `rich` is not "the agent saw more". It is "the agent saw a truncated
+more".** Entry 6 set the observation budget at 12 000 provider tokens and warned
+that a budget much under the richest tree would turn this ablation into a
+comparison of two truncations. Measured over every step both runs took:
+
+```
+              observation tokens     steps whose observation was truncated
+  lean        mean  1,277  max 11,038      3 of 1,924   (0.2%),      24 lines dropped
+  rich        mean 10,164  max 11,741  1,333 of 1,837  (72.6%), 937,115 lines dropped
+```
+
+So the arm labelled `rich` ran into the budget on nearly three quarters of its
+steps. What was compared is `lean` against **`rich` clipped to 12 000 tokens**,
+and any future arm above this budget is measuring the clip as much as the level.
+
+**Cost, and it is the clearest result in this entry:**
+
+```
+  agent tokens   4,000,919  ->  20,719,779    x5.18   (mean 39,225 -> 203,135)
+  judge USD       $0.007926  ->   $0.011138
+  wall clock         76.3 min  ->    111.6 min of round time
+```
+
+**5.18x the tokens for +4.9 points that do not survive an exact test.** If there
+is a decision in this entry, that is it.
+
+The run itself was clean: 102 of 102 terminal in one round, **zero provider
+errors**, concurrency never left 3, four processes retired for wall-clock caps
+exactly as `feat-004` requires, and entry 7's site rule cost 1,946 idle
+worker-seconds of 20,081 (9.7% — within a tenth of a point of the 9.7% it cost
+`full102`). Reachability probed before and after: omnizon 451 both times, the
+other ten 200 both times.
+
+### Part 2 — 3 of 56 convert, so 17.6% is a capability number
+
+Entry 16 left an obvious hole: **56 of 102 episodes ended on the 25-step cap**,
+so 17.6% is a lower bound at that cap, and REAL's ≤41% baseline was not measured
+under a 25-step budget. `runs/cap50/` closes it — the **56 capped tasks and only
+those**, at **double the step cap**, `lean`, same model, same entrypoint, its own
+run id and its own frozen manifest recording the changed cap. Entry 7's
+first-terminal-attempt rule is intact: no task was re-rolled under `full102`'s
+manifest, and `full102`'s records were not touched.
+
+**Doubling the step cap alone would have measured the wrong thing.**
+`scripts/cap_budget.py` now takes `--max-steps`, and at 50 steps the existing
+400 000-token cap has **headroom 0.55x** — it exits 1 and says
+`TOO TIGHT — the token cap would fire before the step cap`. So the token and
+wall-clock caps scale with the step budget and the **per-step allowance is what
+is held constant**: 16 000 tokens and 12 s per step, unchanged from entry 11.
+`ablation.py` re-derives that from the two manifests and prints
+`(allowance per step unchanged)` rather than taking it on trust.
+
+It worked: **all 40 of `cap50`'s caps are step caps.** Max episode wall clock was
+334 s against a 600 s bound and max spend 235 398 tokens against 800 000, so
+neither of the other two caps came near biting. The step cap was the only thing
+binding, which is what makes the next number mean what it says.
+
+```
+  the 56 tasks that ran out of steps at 25, re-run at 50:
+    converted to a pass     3    v1.networkin-4, v1.staynb-2, v1.zilloft-3
+    still out of steps     40    every one of them at exactly 50 steps
+    now terminal, failed   13
+    errored                 0
+    conversion rate       3/56 = 5.4%
+```
+
+**The cap was not the binding constraint. The agent stalls.** Forty of
+fifty-six tasks burned fifty steps and still had not finished — twice the budget
+bought them nothing. Giving the agent more room is not the missing ingredient,
+and **17.6% at 25 steps is a real capability number rather than an artefact of
+the budget.** That is the less convenient of the two answers this run could have
+given, and it is the one it gave.
+
+Stated as a construction, never as a substitute:
+
+```
+  full102 at 25 steps                    18/102 = 17.65%   <- measured, and it stands
+  the same population at 50 steps   (18 + 3)/102 = 20.59%
+```
+
+The 46 tasks that did not run out of steps keep their 25-step outcome, because a
+step cap can only bind on an episode that reached it; the 56 that did contribute
+their new outcome. It is a composite of two runs, not a run, and it carries that
+sentence wherever it is quoted.
+
+**Only one of the three conversions is attributable to the extra steps.** The
+converted tasks finished at 23, 33 and 23 steps — two of them **inside the old
+25-step budget**, on tasks whose `full102` attempt had run out of steps at 25.
+The higher cap cannot explain those. Which leads to the most useful thing this
+run measured by accident:
+
+### The noise floor, measured: the same task at the same budget flips 18% of the time
+
+Ten of the 56 tasks terminated within 25 steps on this attempt, having run out
+of steps at 25 on the last one. Same level, same model, same per-step allowance,
+`temperature=0.0` — the first 25 steps of a `cap50` episode are run under exactly
+the conditions `full102` ran them under. So those ten flips are not the higher
+cap and not the caps at all:
+
+```
+  terminated inside the old 25-step budget on this attempt:  10 of 56  =  17.9%
+    dashdish-11 3, gocalendar-3 12, zilloft-4 17, gomail-8 19, staynb-5 19,
+    udriver-3 19, dashdish-4 23, networkin-4 23 (passed), zilloft-3 23 (passed), gomail-3 24
+```
+
+**A browser agent at temperature 0 is not deterministic**, and on this task set
+roughly one episode in six lands somewhere materially different on a re-run. Two
+of the ten flipped all the way to a pass. That is the measured noise floor, and
+it is why Part 1's fifteen discordant pairs and p = 0.302 should be read as "no
+effect detected" rather than "a small effect found": an ablation looking for a
+five-task difference is working underneath a re-run that moves ten tasks on its
+own.
+
+This bounds every comparison in this repo, including entry 16's own subset
+splits, and it was not measurable until a task set had been run twice under the
+same conditions. It should be measured properly — the same manifest twice at the
+same caps — before any future arm claims a delta of this size.
+
+**Cost of the extra steps**, on the same 56 tasks:
+
+```
+  agent tokens    3,103,453 at 25 steps  ->  5,657,354 at 50   x1.82
+  episode seconds     7,389              ->     10,578
+  judge           5 calls, $0.001740
+  round time      67.0 min, 0 provider errors, concurrency 3 throughout
+```
+
+Doubling the step cap cost 1.82x the tokens and bought one task.
+
+### What is now known, and what is still open
+
+* `rich` observation is 5.18x the tokens for a delta that does not survive an
+  exact test at n = 102. On this evidence there is no reason to run the
+  expensive arm.
+* The 25-step cap was not what was holding the score down. Forty tasks stall
+  regardless.
+* Re-running the same tasks under the same conditions moves ~18% of them. Any
+  future claim about a small delta needs an n that respects that.
+* **Still open:** the same-manifest-twice variance run, which would turn 17.9%
+  from an accidental measurement into a designed one; and whether `rich` above a
+  12 000-token observation budget behaves differently from `rich` clipped to it.
+  Neither is in `feat-007`'s scope and neither is claimed here.

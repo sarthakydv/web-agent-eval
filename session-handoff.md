@@ -4,22 +4,62 @@
 
 - **Goal:** Measure a web agent on REAL (112 tasks, 11 deterministic replica
   sites) with every number traceable to something that actually ran.
-- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` … `feat-006`
+- **Current status:** `feat-001` `[GATE]` **passed**, `feat-002` … `feat-007`
   **done**. **The headline measurement exists: 18 of 102 = 17.6%**, against
   REAL's published **≤41%** baseline, run 2026-07-31 on `glm-4.6` at concurrency
   3 and scored by REAL's own `gpt-4.1` judge. Entry 16.
+- **`feat-007` answered both questions entry 16 left open** (entry 17).
+  `rich` observation: **23/102 = 22.55%** against `lean`'s 17.65%, **+4.9 points
+  at p = 0.302** (McNemar exact, 15 discordant pairs) for **5.18x the tokens** —
+  no effect detected at this n. Cap sensitivity: the 56 capped tasks re-run at
+  **50 steps** converted **3**, and **40 still ran out of steps**, so
+  **17.6% is a capability number, not a cap artefact.** Both figures carry their
+  own `n` and cap and neither replaces the headline.
+- **The noise floor is now measured: 17.9%.** Ten of those 56 tasks terminated
+  inside the old 25-step budget on the re-run, at `temperature=0`. Any future
+  claim about a delta of a few tasks is working underneath that.
 - **Deterministic replicas are easier than live sites, so 17.6% is not
   comparable to a live-web score.** That qualifier goes with the number wherever
   it appears — README, DECISIONS, the evidence field.
 - **The reachable population is 102, not 47 and not 112.** 55 tasks judged by
   `gpt-4.1`, 47 by `jmespath` checks; the 10 omnizon tasks are out at HTTP 451,
   and that count and reason travel with the rate.
-- **Next is `feat-007`**, and entry 16 is what it will be measured against:
-  **56 of 102 episodes ran out of steps** at the `lean` observation level.
+- **Next is `feat-008`**, the README with honest limitations. Every number it
+  needs is now measured; nothing is outstanding for it to wait on.
 - **Branch / commit:** `main`, tracking `origin/main` at
   `github.com/sarthakydv/web-agent-eval` (**public**). CI green.
 
-## Completed This Session (`feat-006` — the full 102-task run)
+## Completed This Session (`feat-007` — the ablation and the cap)
+
+- [x] **`runs/rich102/`** — 102 tasks at `rich`, caps identical to `full102`,
+      111.6 min, one round, supervisor **exit 0**, **zero provider errors**.
+      `passed 23 / failed 19 / capped 60`. **22.55%.**
+- [x] **`runs/cap50/`** — the 56 tasks `full102` ran out of steps on, and only
+      those, at **50 steps / 800 000 tokens / 600 s**, its own frozen manifest,
+      67.0 min, **exit 0**, zero provider errors. **3 converted, 40 still
+      capped**, all 40 on the step cap.
+- [x] **The level is a frozen manifest field.** `manifest.ensure` refuses a
+      resume that contradicts it; `run_batch.py` takes the level from the
+      manifest rather than its own flag, so a half-lean half-rich run cannot be
+      produced by mistyping a command. Manifests predating the field read as
+      unrecorded, so `full102` stays resumable and `supervise.py` idempotent.
+- [x] **`scripts/ablation.py`** — refuses to print a delta until it has proved
+      from the two manifests that the runs differ in exactly one thing. Both
+      modes: `arms` (the ablation) and `cap` (cap sensitivity). Includes an
+      exact two-sided McNemar test on the discordant pairs, because the arms are
+      paired and the totals are not the informative quantity.
+- [x] **`scripts/cap_budget.py --max-steps N`** — re-derives the token cap at a
+      new step budget and prints the per-step allowance. At 50 steps the old
+      400 000-token cap has **headroom 0.55x and the script exits 1**: doubling
+      the step cap alone would have let the token cap fire first.
+- [x] **`scripts/preflight.py`** handles an explicit task subset and checks the
+      level, so a subset run's manifest still names every id and every exclusion.
+- [x] **`tests/test_ablation.py`** — 24 tests. Seven comparability refusals, each
+      with the case where it must **not** fire beside it. 181 in total.
+- [x] **`docs/DECISIONS.md` entry 17**, `README.md` updated so the 25-step cap
+      is stated beside the rate and the ablation's null result is not rounded up.
+
+## Completed Earlier (`feat-006` — the full 102-task run)
 
 - [x] **The run.** `runs/full102/`, 2026-07-31 06:58 → 08:14 UTC, 102 tasks,
       concurrency 3, supervisor **exit 0** — every manifest task has a terminal
@@ -286,26 +326,40 @@ Entries 13, 14 and 15 were appended this session; 1–12 predate it.
 ## Next Session Startup
 
 1. Read `AGENTS.md`, then **only your feature's entry** in `feature_list.json`,
-   then the index at the top of `docs/DECISIONS.md` — for `feat-007`, entry 16
-   is the baseline it moves against, 11 for the caps, 6 for the observation
-   levels and how tokens are counted. Neither file is read end to end.
-2. Run `./init.sh` — expect `157 passed` and all checks passed. It takes ~2½
+   then the index at the top of `docs/DECISIONS.md` — for `feat-008`, entries 16
+   and 17 hold every number the README must state, and 1 holds the claim the
+   project does not make. Neither file is read end to end.
+2. Run `./init.sh` — expect `181 passed` and all checks passed. It takes ~2½
    minutes: `feat-004`'s and `feat-006`'s tests spawn real worker processes.
 3. If the browser is missing: `uv run playwright install chromium` (agisdk pins
    Chromium build 1228; a mismatch fails with an error that does not look like a
    version problem).
 
 Nothing is outstanding. `main` is the only local branch and `main == origin/main`.
-`runs/` is gitignored, so `runs/full102/` is **local only** — its numbers live in
-entry 16 and in `feat-006`'s evidence field. If that directory is lost, the run
-cannot be re-derived; it can only be re-run, and a re-run is a new measurement.
+`runs/` is gitignored, so `runs/full102/`, `runs/rich102/` and `runs/cap50/` are
+**local only** — their numbers live in entries 16 and 17 and in the evidence
+fields of `feat-006` and `feat-007`. If those directories are lost the runs
+cannot be re-derived; they can only be re-run, and a re-run is a new
+measurement — which `feat-007` now quantifies: **17.9% of episodes land
+somewhere materially different on a re-run at `temperature=0`.**
 
 ## Recommended Next Step
 
-`feat-007`, the observation-richness ablation, against entry 16's baseline. Its
-subject is now sharply defined by the run: **56 of 102 episodes exhausted 25
-steps at the `lean` level**, and a capped episode costs an order of magnitude
-more than a passing one, so richness is being paid for either way.
+`feat-008` — the README with honest limitations. Everything it has to state has
+now been measured, and the three qualifiers that must survive editing are:
+
+- **17.6% is at a 25-step cap**, and the cap was tested rather than assumed:
+  3 of 56 capped tasks convert at 50 steps, 40 still stall. Entry 17.
+- **Replica sites are easier than live ones.** A score here is not comparable to
+  a live-web score, and that travels with every number.
+- **A five-task delta is noise here.** The measured run-to-run flip rate is
+  17.9%, so the richness ablation's +4.9 points is "no effect detected", not a
+  small win — and the README must not upgrade it while summarising.
+
+The one thing `feat-007` deliberately left undone: a **designed** variance run —
+the same manifest twice at the same caps — which would turn that 17.9% from an
+accidental measurement into a stated one. It is a new measurement, not an edit
+to an existing one.
 
 How to start any new run — the preflight is not optional:
 

@@ -84,11 +84,25 @@ def manifest_for(args) -> manifest_module.Manifest:
         model=args.model,
         base_url=glm.base_url(),
         episode_entrypoint=args.entrypoint,
+        level=args.level,
         note=args.note or f"concurrency {args.concurrency}, level {args.level}; "
                           f"per-task wall clock at N>1 is not comparable to sequential "
                           f"(DECISIONS entry 7)",
         real_tasks=args.entrypoint == DEFAULT_ENTRYPOINT,
     )
+
+
+def level_for(args, manifest: manifest_module.Manifest) -> str:
+    """The richness the round must run at: the manifest's, not the flag's.
+
+    `feat-007` is a comparison between two runs that differ in exactly this, so
+    the level a round runs at has to come from the frozen record rather than
+    from whatever was typed. `manifest.ensure` already refuses an invocation
+    that contradicts a stored level, which leaves one case: a manifest written
+    before the field existed. Then there is nothing to obey and the flag stands
+    — which is what those runs did anyway.
+    """
+    return manifest.level or args.level
 
 
 def budget_for(args) -> Budget:

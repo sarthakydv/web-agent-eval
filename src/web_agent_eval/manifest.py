@@ -171,6 +171,13 @@ class Manifest:
     model: str
     base_url: str
     episode_entrypoint: str
+    #: The observation richness this run was executed at (`feat-002`'s levels).
+    #: `feat-007` compares two runs that differ in exactly this, so it is a
+    #: frozen field rather than a phrase in `note`: a resume that changed it
+    #: would produce a run whose records are half one arm and half the other,
+    #: and nothing downstream could tell. Empty means "written before this field
+    #: existed" — see `conflicts_with`.
+    level: str = ""
     #: Per entry 7: per-task wall clock at N=3 is not comparable to sequential,
     #: so any timing number read out of this run carries the level it ran at.
     note: str = ""
@@ -192,15 +199,26 @@ class Manifest:
         return asdict(self)
 
     #: The fields a resume may not silently differ on. Task ids and population
-    #: decide the denominator; caps decide what the numbers mean.
-    FROZEN = ("population", "task_ids", "caps", "episode_entrypoint", "model")
+    #: decide the denominator; caps and level decide what the numbers mean.
+    FROZEN = ("population", "task_ids", "caps", "episode_entrypoint", "model", "level")
 
     def conflicts_with(self, other: Manifest) -> list[str]:
-        return [
-            f"{k}: manifest has {getattr(self, k)!r}, this invocation asked for {getattr(other, k)!r}"
-            for k in self.FROZEN
-            if getattr(self, k) != getattr(other, k)
-        ]
+        conflicts = []
+        for key in self.FROZEN:
+            mine, theirs = getattr(self, key), getattr(other, key)
+            if mine == theirs:
+                continue
+            if key == "level" and not mine:
+                # A manifest written before `feat-007` added the field records
+                # its level in `note` and nothing else. There is no stored value
+                # to contradict, so this is not a conflict — refusing here would
+                # make every run predating the field unresumable and
+                # `supervise.py` non-idempotent on them, which entry 7 requires.
+                continue
+            conflicts.append(
+                f"{key}: manifest has {mine!r}, this invocation asked for {theirs!r}"
+            )
+        return conflicts
 
 
 def build(
@@ -213,6 +231,7 @@ def build(
     model: str,
     base_url: str,
     episode_entrypoint: str,
+    level: str = "",
     note: str = "",
     real_tasks: bool = True,
     site_reachability: list[dict] | None = None,
@@ -235,6 +254,7 @@ def build(
         model=model,
         base_url=base_url,
         episode_entrypoint=episode_entrypoint,
+        level=level,
         note=note,
         sites=sorted({site_of(t) for t in task_ids}),
         site_reachability=list(site_reachability or []),

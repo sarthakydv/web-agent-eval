@@ -152,6 +152,10 @@ def check_model(model: str) -> tuple[bool, dict]:
     return True, info
 
 
+def explicit_ids(args) -> list[str]:
+    return [t.strip() for t in args.tasks.split(",") if t.strip()]
+
+
 def check_manifest(run_dir: Path, args, entries: list[dict]) -> bool:
     """Re-read the manifest from disk and check it says what was asked for."""
     manifest = manifest_module.load(run_dir)
@@ -161,6 +165,7 @@ def check_manifest(run_dir: Path, args, entries: list[dict]) -> bool:
     print(f"  population   {manifest.population}  n={manifest.size}")
     print(f"  sites        {len(manifest.sites)}: {', '.join(manifest.sites)}")
     print(f"  concurrency  {manifest.concurrency}")
+    print(f"  level        {manifest.level}")
     print(f"  model        requested {manifest.model!r}, "
           f"served {manifest.served_model.get('served')!r}")
     print(f"  caps         {manifest.caps}")
@@ -176,19 +181,40 @@ def check_manifest(run_dir: Path, args, entries: list[dict]) -> bool:
     failures = []
     if manifest.population != args.population:
         failures.append(f"population is {manifest.population}, asked for {args.population}")
-    if manifest.size != int(args.population):
-        failures.append(f"n is {manifest.size}, population {args.population} means "
-                        f"{int(args.population)}")
     if manifest.concurrency != args.concurrency:
         failures.append(f"concurrency is {manifest.concurrency}, asked for {args.concurrency}")
+    if manifest.level != args.level:
+        failures.append(f"level is {manifest.level!r}, asked for {args.level!r}")
     if len(manifest.exclusions) != 112 - manifest.size:
         failures.append(f"{len(manifest.exclusions)} exclusions for {manifest.size} of 112 tasks")
-    excluded_sites = {manifest_module.site_of(e["task_id"]) for e in manifest.exclusions}
-    if excluded_sites != EXPECTED_UNREACHABLE:
-        failures.append(f"exclusions cover sites {sorted(excluded_sites)}, "
-                        f"expected {sorted(EXPECTED_UNREACHABLE)}")
-    if not all("451" in e["reason"] for e in manifest.exclusions):
-        failures.append("an exclusion does not give HTTP 451 as its reason")
+
+    if args.population == "explicit":
+        # A named subset of REAL's v1 set — `feat-007`'s cap-sensitivity run is
+        # exactly this. There is no population size to check it against, so what
+        # is checked instead is that the manifest holds the ids that were asked
+        # for and nothing else, and that every other v1 task is an exclusion
+        # naming the reason it is out. A subset chosen by the person running it
+        # is only defensible if the record says which ids and why.
+        wanted = explicit_ids(args)
+        if manifest.task_ids != list(dict.fromkeys(wanted)):
+            failures.append(f"task_ids do not match --tasks "
+                            f"({len(manifest.task_ids)} in the manifest, {len(wanted)} asked for)")
+        if any(manifest_module.site_of(t) in EXPECTED_UNREACHABLE for t in manifest.task_ids):
+            failures.append(f"the explicit list names a task on an unreachable site "
+                            f"{sorted(EXPECTED_UNREACHABLE)}")
+        if not all(e["reason"] for e in manifest.exclusions):
+            failures.append("an exclusion carries no reason")
+    else:
+        if manifest.size != int(args.population):
+            failures.append(f"n is {manifest.size}, population {args.population} means "
+                            f"{int(args.population)}")
+        excluded_sites = {manifest_module.site_of(e["task_id"]) for e in manifest.exclusions}
+        if excluded_sites != EXPECTED_UNREACHABLE:
+            failures.append(f"exclusions cover sites {sorted(excluded_sites)}, "
+                            f"expected {sorted(EXPECTED_UNREACHABLE)}")
+        if not all("451" in e["reason"] for e in manifest.exclusions):
+            failures.append("an exclusion does not give HTTP 451 as its reason")
+
     today = datetime.now(UTC).date().isoformat()
     if not manifest.created.startswith(today):
         failures.append(f"created {manifest.created} is not today ({today})")
@@ -205,7 +231,7 @@ def check_manifest(run_dir: Path, args, entries: list[dict]) -> bool:
             print(f"    - {failure}")
         return False
     print("\n  checked: population, n, exclusion count and reason, sites, concurrency, "
-          "served model, reachability record, date")
+          "level, served model, reachability record, date")
     return True
 
 
@@ -224,7 +250,11 @@ def main(argv: list[str] | None = None) -> int:
               f"resume the existing run with scripts/supervise.py.", file=sys.stderr)
         return 1
 
-    wanted_ids, _ = manifest_module.population(args.population)
+    try:
+        wanted_ids, _ = manifest_module.population(args.population, explicit_ids(args))
+    except (ValueError, RuntimeError) as exc:
+        print(f"\ncannot start: {exc}", file=sys.stderr)
+        return 1
     ok_judge, judge_info = check_judge(wanted_ids)
     ok_sites, entries = check_sites(args.probe_attempts)
     ok_model, model_info = check_model(args.model)
@@ -236,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = manifest_module.ensure(run_dir, manifest_module.build(
         args.run_id,
         population_name=args.population,
-        explicit=[t.strip() for t in args.tasks.split(",") if t.strip()],
+        explicit=explicit_ids(args),
         concurrency=args.concurrency,
         caps={
             "max_steps": args.max_steps,
@@ -246,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
         base_url=glm.base_url(),
         episode_entrypoint=args.entrypoint,
+        level=args.level,
         note=args.note or f"concurrency {args.concurrency}, level {args.level}; "
                           f"per-task wall clock at N>1 is not comparable to sequential "
                           f"(DECISIONS entry 7)",
