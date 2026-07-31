@@ -3,14 +3,14 @@
 ## Current State
 
 **Last Updated:** 2026-07-31
-**Active Feature:** none — `feat-001`, `feat-002` and `feat-003` are done, next
-is `feat-004`
+**Active Feature:** none — `feat-001` … `feat-004` are done, next is `feat-005`
 **Status:** the `[GATE]` is through (one REAL task scored **1.0**), the
 observation serializer exists with richness as a parameter and a measured token
-budget, and the **episode loop is built and bounded** — steps, tokens and wall
-clock, each firing on its own and each recorded when it does. The batch runner
-and supervisor are not built. The repo is **public** at
-`github.com/sarthakydv/web-agent-eval` with CI green.
+budget, the **episode loop is built and bounded**, and the **batch runner and
+supervisor are built, tested and proven against a real SIGKILL, a real 429 and a
+real budget overrun**. `feat-005` is **blocked on a human step**: the
+`OPENAI_API_KEY` placeholder in `.env` must be filled (entry 10). The repo is
+**public** at `github.com/sarthakydv/web-agent-eval` with CI green.
 
 ## Status
 
@@ -64,7 +64,38 @@ and supervisor are not built. The repo is **public** at
       limit). No module-level mutable state, no cached singletons, per-episode
       clocks and counters, caller-supplied output paths, task id on every log
       line. Two concurrent episodes against fakes are asserted independent.
-- [x] 76 tests passing; all of them run with no browser, no network and no
+- [x] **`feat-004` done.** `src/web_agent_eval/{manifest,records,batch,cli}.py`
+      plus `scripts/{run_batch,supervise}.py`: a batch runner that resumes and a
+      supervisor that stops on one of three machine-checkable conditions.
+      `docs/DECISIONS.md` entry 12.
+- [x] **The concurrency limit was measured, and the published 3 is wrong for
+      this key.** `scripts/concurrency_probe.py`: 2, 3, 4, 5, 6, 8, 10 and 12
+      simultaneous completions were **all accepted, none rejected**, and a
+      sustained 3-worker probe at the run's own cadence (one call per 4 s per
+      worker) ran **315 calls over 7 minutes with zero rejections and no latency
+      drift**. z.ai's published 3 is a pay-as-you-go figure; this is a Coding
+      Plan key (entry 4). **The default stays 3** — the site rule and
+      comparability, not the provider, are what bind now, and raising it is a
+      human scoping decision.
+- [x] **A worker whose wall-clock cap fired is SIGKILLed and never reused.**
+      Python cannot kill a thread, so a fired cap leaves the episode's worker
+      thread *abandoned, not terminated*, possibly still driving a browser. REAL
+      scores by diffing environment state, so reusing that process would
+      contaminate the next task's diff and produce a silently wrong score. One
+      process per task, killed after a 1 s grace on a `wall_clock` cap, and its
+      site stays reserved until it is confirmed dead — entry 12.
+- [x] **Killed and resumed for real.** A 6-task batch was SIGKILLed with 2
+      records on disk and 3 workers in flight; the restart reported `2 of 6
+      already terminal (skipping them)`, re-ran none of them, left both records
+      byte-identical (sha256 checked), and exited 0.
+- [x] **A provider outage produces zero terminal records.** Pointed at the 429
+      endpoint, the supervisor exited 1 as stalled with **no `records/`
+      directory at all** and four non-terminal `provider_error` rows. The
+      control — the same tasks on the working endpoint — exited 0.
+- [x] **A budget the run cannot meet exits 2 mid-run** with every already
+      terminal record intact; resumed with a budget it can meet, the same run
+      exited 0.
+- [x] 126 tests passing; all of them run with no browser, no network and no
       API key.
 - [x] **The tracker enforces its own rules, and each was tested by breaking it.**
       `init.sh` fails on a feature with no `verification` command, a `done`
@@ -80,26 +111,21 @@ and supervisor are not built. The repo is **public** at
 
 ### What's In Progress
 
-- Nothing. Stopped after `feat-003` as instructed. `feat-004` is not started.
+- Nothing. Stopped after `feat-004` as instructed, before `feat-005`.
 
 ### What's Next
 
-1. `feat-004` — the batch runner and supervisor over the 112 (102 reachable),
-   with resume. **Its rules are already decided in DECISIONS entry 7 and must
-   not be re-litigated mid-run:** frozen manifest, provider errors that are not
-   task failures, attempts that append and score the first terminal attempt, and
-   a supervisor that stops on a machine-checkable condition.
-2. `feat-004` consumes `run_episode()` and must map its three outcomes onto
-   entry 7's four terminal statuses: `completed` + reward → `passed`/`failed`,
-   `capped` counted and published **separately**, `errored` as-is. The cap
-   reason is already machine-readable: `{"cap": "wall_clock", "limit": 300.0,
-   "observed": 300.4, "unit": "seconds"}`.
-3. **Workers are processes, not threads** (entry 7): Playwright's sync API has
-   thread affinity, and a process boundary is what reclaims a browser left
-   wedged by a wall-clock cap. The loop reports `cleanup.wedged_on` when that
-   happens rather than claiming a clean close.
-4. **Probe the real concurrency limit before the full run.** Entry 7's 3 is
-   z.ai's *published* pay-as-you-go number and this is a Coding Plan key.
+1. **`feat-005` needs a human step first: fill `OPENAI_API_KEY` in `.env`.**
+   It is a placeholder today. 60 of the 112 tasks have an `llm_boolean` eval
+   that agisdk grades with a hardcoded OpenAI `gpt-4.1` judge (entries 4 and
+   10), so without it the population is 47 rather than 102 and the denominator
+   stops being comparable to REAL's published baseline.
+2. `feat-006` chooses the population — 112, 102 or 47 — and the runner already
+   freezes that choice into `runs/<run-id>/manifest.json` with every exclusion
+   and its reason. `--population 47` runs today with no OpenAI key at all.
+3. The full run is `uv run python scripts/supervise.py --run-id <id>
+   --population <112|102|47>`; it resumes on its own after any interruption and
+   is a no-op once complete.
 
 ## Blockers / Risks
 
@@ -146,10 +172,29 @@ and supervisor are not built. The repo is **public** at
   then steps — entry 11.
 - **`completed` is not `passed`.** The loop decides the two outcomes it honestly
   can and hands the reward to `feat-004`/`feat-005` for the rest — entry 11.
+- **The manifest is frozen and a resume that contradicts it is refused.**
+  Population, task ids, caps, model and entrypoint are the fields that decide
+  what a run's number means; changing them under an existing run id is an error,
+  not a quietly different experiment — entry 12.
+- **A process that hit the wall-clock cap is retired, never reused**, and its
+  site is held until it is confirmed dead — entry 12.
+- **The attempt row is written before the terminal record**, so a kill in
+  between leaves the task pending rather than done-with-no-trace — entry 12.
+- **Rounds are numbered across restarts**, so a resumed run cannot overwrite the
+  round file of the run it is resuming — entry 12.
+- **Concurrency default stays 3 despite the probe.** The measurement removed the
+  provider constraint; the site rule and comparability remain, and raising the
+  default is a human scoping decision — entry 12.
 
 ## Files Modified This Session
 
-`feat-003`, the episode loop: `src/web_agent_eval/{episode,caps,policy,
+`feat-004`, the batch runner and supervisor: `src/web_agent_eval/{manifest,
+records,batch,cli}.py` (new), `scripts/{run_batch,supervise,concurrency_probe}.py`
+(new), `tests/{test_resume,test_supervise,fake_episodes}.py` (new),
+`feature_list.json`, `docs/DECISIONS.md` (entry 12), `progress.md`,
+`session-handoff.md`. Nothing in `feat-003`'s loop was changed.
+
+Previous session — `feat-003`, the episode loop: `src/web_agent_eval/{episode,caps,policy,
 environment,action}.py` (new), `src/web_agent_eval/tokens.py` (added
 `make_encoder`, the per-episode handle), `src/web_agent_eval/gate_agent.py`
 (`extract_action` moved to `action.py`; it is not gate scaffolding and entry 6
@@ -187,7 +232,16 @@ Earlier session: `src/web_agent_eval/{__init__,glm,gate_agent}.py`,
       time. Four deliberate breaks confirmed the suite is not vacuous — entry 11.
 - [x] Cap derivation: `uv run python scripts/cap_budget.py` → worst honest
       episode 354 350 provider tokens against a 400 000 cap, 1.13x headroom.
-- [x] Tests pass: `uv run pytest -q` → `76 passed in 2.96s`
+- [x] `feat-004` verification, all four checks with their control cases:
+      `uv run pytest -q -k 'resume or supervise'` → `50 passed, 76 deselected in
+      118.18s`; a real batch SIGKILLed and restarted (skipped 2 of 6, re-ran
+      none, records byte-identical, exit 0); a real 429 endpoint → exit 1 with
+      **zero** terminal records; a 60 000-token budget → exit 2 mid-run with 3
+      records intact, and the same run resumed at 400 000 → exit 0. Three
+      deliberate breaks confirmed the suite is not vacuous — entry 12.
+- [x] Concurrency probe: burst 2–12 all accepted, and 315 sustained calls over
+      7 minutes at the run's cadence with zero rejections — entry 12.
+- [x] Tests pass: `uv run pytest -q` → `126 passed in 117.98s`
 - [x] Lint clean: `uv run ruff check .` → `All checks passed!`
 - [x] Full path: `./init.sh` → `=== All checks passed ===`
 
@@ -214,9 +268,16 @@ pre-flattened tree is not the richness level `feat-007` asked for. It also
 leaves gym's `max_episode_steps` unset on purpose: the `TimeLimit` wrapper would
 record a wrapper truncation as `completed`/`truncated` rather than `capped`.
 
-`AgisdkEnvironment` is the one piece **no test exercises** — it needs a browser
-and the hosted sites. `feat-004`'s first run is its first real exercise, and it
-should be run on one task before a batch.
+`AgisdkEnvironment` has now been exercised for real: 11 live episodes ran across
+`feat-004`'s checks. **That is not a success rate** — 4 passed, 4 failed, 3
+capped on steps, over task sets chosen to exercise the mechanics, n = 11,
+population `explicit`. It must never be quoted as a score.
+
+Worth `feat-006`'s attention: **every cap that fired in a real episode was the
+25-step cap**, at the `lean` observation level, and one episode spent 74 918
+tokens. No wall-clock cap fired in a real run, so the abandoned-thread rule is
+verified against a fake that reproduces the condition exactly
+(`tests/fake_episodes.py`, `v1.wedge-*`) rather than a live browser hang.
 
 Two accounting lines exist now and must never be mixed: **budget accounting** is
 local `tiktoken` over a rendered observation; **cost accounting** (`feat-005`) is

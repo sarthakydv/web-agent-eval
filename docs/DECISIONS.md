@@ -18,6 +18,7 @@ records something that actually ran or a decision taken with its reasoning.
 - **9** (2026-07-31) — What this key actually serves: `glm-5.1` is not one of the things
 - **10** (2026-07-31) — The agent is GLM; the scorer is REAL's own judge
 - **11** (2026-07-31) — `feat-003`: the episode loop, and the three caps it is bounded by
+- **12** (2026-07-31) — `feat-004`: what this key really allows, and the batch that survives being killed
 
 <!-- INDEX:END -->
 
@@ -1033,3 +1034,178 @@ because it needs a browser and the hosted replica sites; `feat-003`'s tests run
 against fakes on purpose, since the caps are the subject and a browser would
 make the wall-clock case slow and flaky. Its first real exercise is `feat-004`'s
 first run. That is stated here rather than implied by its presence.
+
+---
+
+## 12 — `feat-004`: what this key really allows, and the batch that survives being killed
+
+**Date:** 2026-07-31
+**Reproduce:** `uv run python scripts/concurrency_probe.py` (burst),
+`uv run python scripts/concurrency_probe.py --sustained-only --concurrency 3
+--interval-s 4 --sustained-minutes 7` (sustained),
+`uv run pytest -q -k 'resume or supervise'` (offline, no browser, no key)
+
+### The concurrency limit was measured before any batch code was written
+
+Entry 7 caps concurrency at 3 because z.ai **publishes** 3 for `glm-4.6`, and
+says in the same breath that the figure is for the pay-as-you-go API while this
+is a Coding Plan key — two products entry 4 already proved are not the same
+(429 on `paas/v4`, 200 on `coding/paas/v4`, same key). So the 3 was an
+assumption. It is now a measurement, and the assumption was wrong.
+
+**Burst — simultaneous trivial completions, `glm-4.6`, coding-plan endpoint.**
+Fired through a `threading.Barrier` so every request in a level genuinely starts
+at once; a thread pool would let the first finish before the last began and
+would measure nothing.
+
+```
+  N  accepted  rejected  codes   latency min/max (s)
+  2         2         0  -            1.45 /  1.68
+  3         3         0  -            0.83 /  0.85
+  4         4         0  -            0.92 /  0.93
+  5         5         0  -            1.08 /  1.09
+  6         6         0  -            1.47 /  1.48
+  8         8         0  -            1.05 /  1.06
+ 10        10         0  -            1.02 /  1.14
+ 12        12         0  -            1.07 /  1.86
+```
+
+**Nothing was rejected, at any level, up to 12.** The published limit of 3 is
+not enforced on this key at this endpoint. Latency is flat across levels, so
+these are not requests being queued into a single lane either.
+
+**Sustained — 3 workers, one call each per 4 s, 7 minutes.** A burst cannot see
+the failure that actually costs a night: a quota that only appears two hours in.
+The pacing is the run's own — entry 4 measured 9 model calls in 35.4 s for one
+episode, about one call per 4 s per worker — so this reproduces the load
+`feat-006` will apply rather than a load this project never generates.
+
+```
+ minute   calls     ok  rejected  codes   mean latency (s)   tokens
+      0      45     45         0  -                   0.93      540
+      1      45     45         0  -                   0.83      540
+      2      45     45         0  -                   0.99      540
+      3      45     45         0  -                   0.84      540
+      4      45     45         0  -                   1.33      540
+      5      45     45         0  -                   0.86      540
+      6      45     45         0  -                   1.03      540
+                   ---
+      total 315 calls, 315 ok, 0 rejected
+```
+
+**315 consecutive calls over 7 minutes at the run's cadence, zero rejections,
+and no latency drift.** No rate-limit headers are exposed to read a quota from
+(`x-ratelimit-*` absent on a 200; the response carries only `X-LOG-ID`), so load
+is the only instrument available.
+
+**What this does and does not rule out, stated plainly.** It rules out a
+concurrency limit of 3 on this key, and any quota that would bite inside 315
+calls or 7 minutes. It does **not** rule out a quota at, say, 2 000 calls or at
+hour two — a full 47-task run is only of order 500–1 000 model calls, so probing
+that far would cost as much as the run it protects. The design answer to the
+unruled-out case is not a bigger probe: a provider error is non-terminal, the
+supervisor stalls and exits 1 rather than manufacturing failures, and the run
+resumes. That is what makes the residual risk survivable.
+
+**The default stays 3 anyway.** The measurement lifts the provider constraint,
+not the others: episodes are model-bound, there are 10 usable sites, and no two
+episodes may share a site until state isolation is measured (entry 7). Raising
+the default changes what a published per-task wall clock means, which is a
+scoping decision for a human — recorded here first, exactly like the refusal to
+switch models in entry 9. `--concurrency N` is available; the default is 3 and
+the manifest records the level every run actually used.
+
+### A process whose wall-clock cap fired may never be reused
+
+Found while validating `feat-003`, and it is the one rule in this feature that
+entry 7 does not already contain.
+
+`feat-003`'s wall-clock cap is a `future.result(timeout=...)` on the episode's
+own worker thread. That bounds the **wait**, and Python cannot kill a thread —
+so when the cap fires the worker thread is **abandoned, not terminated**, and it
+may still be driving a browser. Entry 11 records this honestly as
+`cleanup: {"wedged_on": "env.step", "env_closed": false}`.
+
+Handing that process another task would let the abandoned thread touch the next
+task's environment. **REAL scores by diffing environment state** — the gate's
+own result was `differences: {emails: {updated: [{id: "53", isRead: true}]}}` —
+so a contaminated environment produces a *silently wrong score*, which is the
+exact class of error entry 7 exists to prevent. So:
+
+- **One process per task.** Reuse is structurally impossible, not merely avoided.
+- **A worker that reports a `wall_clock` cap is SIGKILLed**, after a one-second
+  grace rather than the ten a normal worker gets. Killing it is what stops the
+  abandoned thread; waiting is what lets it keep going.
+- **Its site stays reserved until the process is confirmed dead**, because the
+  thread that is still running is still on that site.
+
+This was verified by breaking it. Removing the kill turns
+`test_a_wall_clock_capped_worker_is_killed_and_never_reused` from green to:
+
+```
+E       assert ([{'task_id': 'v1.wedge-1', 'pid': 39379, 'reason': "wall-clock cap fired: the
+        episode's worker thread was abandoned, not terminated, so this process must not run
+        another task", 'killed': False}] and False is True)
+1 failed, 125 deselected in 3.61s
+```
+
+and then **`pytest` itself could not exit** — `multiprocessing` joins non-daemon
+children at interpreter exit, and the abandoned thread keeps the child alive for
+its full hour. The test names the bug in 3.6 s; the hang is the bug.
+
+### The run loop, as built
+
+Entry 7's rules, implemented and not re-litigated:
+
+| Rule | Where |
+|---|---|
+| manifest frozen before task 1, never edited | `manifest.py`; a resume that changes population, task ids, caps, model or entrypoint is refused |
+| one atomic record per task | `records.write_terminal_record` — temp file, `fsync`, `os.replace` |
+| provider error is non-terminal | `records.is_provider_error` / `classify`; no record file, task stays pending |
+| `results.tsv` append-only, one row per attempt | `records.append_attempt` — one `os.write` to an `O_APPEND` fd, safe across worker processes |
+| rate from the **first** terminal attempt | `records.summarise` |
+| supervisor exits 0 / 1 / 2, never unbounded | `scripts/supervise.py`, plus `--max-rounds` as a hard stop that reports as stalled |
+| workers are processes | `multiprocessing` spawn, one per task |
+| no two episodes on one site | scheduler holds the site until the worker is dead |
+| halve concurrency on a provider error, recover slowly | halve on each one; one worker back per five clean episodes, and at most one per round |
+
+Two orderings carry weight and are worth naming:
+
+**The attempt row is written before the terminal record.** A kill in between
+leaves an attempt visible and the task still pending, which resumes correctly.
+The reverse order could mark a task done with no trace of what did it.
+
+**Rounds are numbered across restarts.** A resumed run that began again at round
+1 would overwrite the round file of the run it is resuming. Found by the kill
+test, fixed.
+
+### The four checks, and the case where each must not fire
+
+Full output is in `feature_list.json`'s `evidence` field for `feat-004`.
+
+| Check | Fires | Control — must not fire |
+|---|---|---|
+| tests | 50 pass | three deliberate breaks (no kill, no resume, 429-as-failure) each turn tests red |
+| kill | SIGKILL mid-run; restart skips 2 of 6, re-runs none, records byte-identical, exits 0 | a fresh run reports `0 of 6 already terminal` and runs all six |
+| stall | 429 endpoint → exit 1, **zero** terminal records, 4 provider-error rows | same tasks on the working endpoint → exit 0, 2 terminal records |
+| budget | 60 000-token budget → exit 2 mid-run, 3 records intact | same run resumed at 400 000 → exit 0, finishes |
+
+The stall test uses this key against `paas/v4`, which entry 4 measured as a real
+`429 / code 1113`. The episode record reads
+`RateLimitError: Error code: 429 - {'error': {'code': '1113', ...}}`, is
+classified `provider_error`, and **no record file is written for it at all**.
+
+### Two observations for `feat-006`, not fixed here
+
+**A wall-clock cap did not fire in any real episode** in these runs — every cap
+hit was the 25-step cap. The abandoned-thread rule above is therefore verified
+against a fake that reproduces the condition exactly, not against a live
+browser hang. Stated rather than glossed.
+
+**11 real episodes ran across the four checks: 4 passed, 4 failed, 3 capped on
+steps.** That is not a success rate and must not be quoted as one — the task set
+was chosen for the mechanics, `n` is 11, and the population is `explicit`. What
+it does say is that the 25-step cap is doing real work at the `lean` observation
+level, which is `feat-006`'s and `feat-007`'s subject. Per-episode cost ran
+8 940 to 74 918 tokens, 23.5 s to 109 s, at concurrency 2–3 — and per entry 7 a
+per-task wall clock at N>1 is not comparable to a sequential one.
